@@ -26,7 +26,7 @@ def test_normalize_feature_parses_osm_type_and_ref():
     raw = {
         "type": "Feature",
         "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]},
-        "properties": {"@osmId": "way/12345", "@snapshotTimestamp": "2026-07-01T00:00:00Z"},
+        "properties": {"@osmId": "way/12345", "@validFrom": "2026-07-01T00:00:00Z"},
     }
 
     feature = normalize_feature(raw)
@@ -94,6 +94,26 @@ def test_build_snapshot_from_raw_repairs_invalid_geometry_and_keeps_original(
     assert props["repair_method"] == "make_valid"
     assert props["repaired_valid"] is True
     assert props["original_geometry"] != invalid_feature["geometry"]
+
+
+def test_build_snapshot_from_raw_excludes_versions_outside_requested_instant(
+    ohsome_response_fixture,
+):
+    # The fixture includes a 5th feature (way/100000005) whose @validFrom is
+    # a fraction of a second after the requested instant -- representing a
+    # real edit that happened to fall inside the ohsome full-history query's
+    # minimal-width tail (see ohsome_client.py's module docstring). It must
+    # not appear in the snapshot: it wasn't the state *at* requested_time.
+    result = build_snapshot_from_raw(
+        ohsome_response_fixture,
+        aoi=TEST_AOI,
+        requested_time=datetime(2026, 7, 1, tzinfo=UTC),
+        source_query_version="v1",
+    )
+
+    osm_ids = {f["properties"]["osm_id"] for f in result.processed_geojson["features"]}
+    assert "way/100000005" not in osm_ids
+    assert len(osm_ids) == 4
 
 
 def test_build_snapshot_from_raw_preserves_raw_tags_without_metadata_fields(

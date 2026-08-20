@@ -33,9 +33,16 @@ Same ODbL/attribution terms apply.
 ```bash
 cp .env.example .env   # then fill in real values -- never commit .env
 make install            # creates .venv, installs pinned deps
-make up                  # Airflow (LocalExecutor) + Postgres/PostGIS + MinIO
+make up                  # builds the Airflow image (Dockerfile) + brings up
+                          # Airflow (LocalExecutor) + Postgres/PostGIS + MinIO
 make migrate             # applies sql/*.sql to the `gis` database
 ```
+
+Needs a `docker` group membership (`sudo usermod -aG docker "$USER"`, then a
+fresh login) and Docker Compose v2 (`docker compose ...`, not the old
+standalone `docker-compose` v1 binary -- v1 predates the
+`service_completed_successfully` `depends_on` condition this compose file
+relies on for `airflow-init` sequencing).
 
 - Airflow UI: http://localhost:8080 (`_AIRFLOW_WWW_USER_USERNAME` / `_PASSWORD` from `.env`)
 - MinIO console: http://localhost:9001 (`MINIO_ROOT_USER` / `_PASSWORD` from `.env`)
@@ -52,39 +59,56 @@ make test-db            # needs `make up && make migrate` (real local Postgres)
 make test-integration    # hits the real ohsome API over the network
 ```
 
-## Known limitations / things to verify on first real run
+## Verified end-to-end (2026-08-20)
 
-This project's ingestion code and tests were built and validated inside a
-sandboxed dev environment without Docker access, so the full stack has not
-been run end-to-end yet. Specifically still to verify on your machine:
+The full stack has been run for real (Docker, not just designed against
+docs) and the four things flagged as unverified in earlier drafts of this
+README are now resolved:
 
-1. **`docker compose up` itself** -- the compose file, Airflow 3.3.1 service
-   topology (LocalExecutor, no Celery/Redis per project scope), and the two
-   Airflow Connections (`minio_default`, `gis_postgres_default`) created by
-   `airflow-init` have not been run for real.
-2. **ohsome's `/elements/geometry` endpoint** -- confirmed working for
-   `/metadata`, `/elements/count`, and `/elements/bbox` from the sandbox's
-   network, but `/elements/geometry` (the endpoint this project actually
-   uses, for real footprint geometry) and `/elements/centroid` returned
-   HTTP 403 from that specific network -- most likely a WAF/anti-abuse rule
-   on a shared sandbox egress IP, not a real API restriction. Worth a quick
-   manual check (`make test-integration`, or a direct `curl`) before relying
-   on it in a scheduled run.
-3. **ohsome's tag-property response shape** -- `src/ingestion/snapshot.py`
-   assumes `properties=tags` flattens OSM tags directly into each feature's
-   `properties` object (alongside `@osmId`/`@snapshotTimestamp`), based on
-   ohsome's documented conventions. This wasn't confirmed against a live
-   `/elements/geometry` response (blocked, see above) -- only against
-   `/elements/bbox`, which didn't have tags requested. Worth confirming on
-   first real run and adjusting `normalize_feature()` if the actual shape
-   differs.
-4. **AOI boundary clipping semantics** -- whether ohsome's `bpolys` clips
-   returned geometries to the boundary or only filters by intersection is
-   still unconfirmed (needs a real `/elements/geometry` call near the AOI
-   edge). This defines our actual behavior for the "features clipped by the
-   AOI boundary" test case CLAUDE.md's testing section calls for.
-5. **Snapshot dates**: ohsome's underlying data extent currently reaches
-   only `2026-07-27T09:00Z` (confirmed via `GET /v1/metadata`), so the
-   default `requested_times` are `2025-07-01` / `2026-06-01` / `2026-07-01`,
-   not the `2025-08-01` / `2026-07-01` / `2026-08-01` originally discussed --
-   shifted back one month to stay inside real coverage, same spacing.
+1. **`docker compose up` works** -- with one fix beyond what's described
+   above: the stock `apache/airflow:3.3.1` image doesn't include this
+   project's business-logic dependencies (geopandas/shapely/pyproj/
+   requests/psycopg), so `x-airflow-common` now builds a local `Dockerfile`
+   that extends the official image with them, rather than using the bare
+   image directly. `_PIP_ADDITIONAL_REQUIREMENTS` was deliberately not used
+   for this -- Airflow's own docs describe it as "ONLY for quick checks."
+2. **ohsome's `POST /elements/geometry` is genuinely blocked (HTTP 403),
+   confirmed from two independent real networks**, not a sandbox-specific
+   fluke -- same for `/elements/centroid`. `/elements/bbox`,
+   `/elements/count`, and `/elementsFullHistory/geometry` all work fine.
+   No public explanation was found. The fix: `src/ingestion/ohsome_client.py`
+   now queries `POST /elementsFullHistory/geometry` with a minimal
+   (1-second) time *range* starting at the target instant; ohsome clips
+   each returned version's `@validFrom`/`@validTo` to the query bounds, so
+   filtering the response to `@validFrom == <requested instant>` (done in
+   `src/ingestion/snapshot.py`) reconstructs the same point-in-time result
+   the blocked endpoint would have given. Cross-checked live against
+   `/elements/count` for the same instant/bbox -- feature counts matched
+   exactly.
+3. **ohsome's tag shape, confirmed**: `properties=tags` flattens OSM tags
+   directly into each feature's `properties` object, alongside `@`-prefixed
+   metadata (`@osmId`, `@validFrom`, `@validTo`) -- exactly what
+   `normalize_feature()` assumed.
+4. **AOI boundary clipping, confirmed**: ohsome's `bpolys` *clips*
+   geometries to the AOI polygon, not just filters by intersection --
+   verified by downloading a real snapshot and checking every feature that
+   isn't fully `.contains()`-ed by the AOI polygon: the area outside the
+   AOI is on the order of 1e-11 to 1e-14 square degrees (floating-point
+   boundary noise, not real overhang) for all such features.
+
+A real end-to-end run against Tel Aviv-Yafo produced (feature counts /
+invalid-then-repaired geometries out of that count):
+
+| requested_time | feature_count | invalid_geometry_count |
+|---|---|---|
+| 2025-07-01 | 27013 | 3 |
+| 2026-06-01 | 26996 | 4 |
+| 2026-07-01 | 26982 | 4 |
+
+Idempotency was also verified for real: re-triggering the DAG with the same
+`requested_times` left the `snapshots` table at 3 rows (no duplicates).
+
+Snapshot dates default to `2025-07-01` / `2026-06-01` / `2026-07-01`, not
+the `2025-08-01` / `2026-07-01` / `2026-08-01` originally discussed --
+shifted back one month after `GET /v1/metadata` showed ohsome's data extent
+only reaches `2026-07-27T09:00Z`, keeping the same 1-month/1-year spacing.

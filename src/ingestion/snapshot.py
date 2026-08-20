@@ -45,6 +45,27 @@ def _parse_osm_id(osm_id: str) -> tuple[str, str]:
     return osm_type, osm_ref
 
 
+def _select_features_valid_at(
+    raw_features: list[dict[str, Any]], requested_time: datetime
+) -> list[dict[str, Any]]:
+    """ohsome_client fetches from /elementsFullHistory/geometry (see its
+    module docstring for why), which returns one row per version-interval
+    touching the query's minimal-width range, not just the state at
+    requested_time. ohsome clips each version's @validFrom/@validTo to the
+    query bounds, so the feature(s) actually valid at requested_time are
+    exactly the ones whose @validFrom equals it precisely -- verified live
+    against ohsome's (unblocked) /elements/count as a cross-check. Anything
+    else is a later edit that happened to fall inside the query's 1-second
+    tail and must be discarded here, not treated as part of this snapshot.
+    """
+    target = ohsome_client.format_instant(requested_time)
+    return [
+        feature
+        for feature in raw_features
+        if feature.get("properties", {}).get("@validFrom") == target
+    ]
+
+
 def normalize_feature(raw_feature: dict[str, Any]) -> dict[str, Any]:
     """Validate/repair one raw ohsome feature and normalize its attributes
     into our own documented shape (see building_category.py for the
@@ -95,7 +116,10 @@ def build_snapshot_from_raw(
     invalid_count = 0
     repaired_count = 0
 
-    for raw_feature in raw_geojson.get("features", []):
+    features_at_instant = _select_features_valid_at(
+        raw_geojson.get("features", []), requested_time
+    )
+    for raw_feature in features_at_instant:
         feature = normalize_feature(raw_feature)
         processed_features.append(feature)
         if not feature["properties"]["original_valid"]:

@@ -22,7 +22,8 @@
       },
       "properties": {
         "@osmId": "way/100000001",
-        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "@validFrom": "2026-07-01T00:00:00Z",
+        "@validTo": "2026-07-01T00:00:01Z",
         "building": "house",
         "name": "Test House"
       }
@@ -50,7 +51,8 @@
       },
       "properties": {
         "@osmId": "way/100000002",
-        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "@validFrom": "2026-07-01T00:00:00Z",
+        "@validTo": "2026-07-01T00:00:01Z",
         "building": "apartments"
       }
     },
@@ -70,7 +72,8 @@
       },
       "properties": {
         "@osmId": "way/100000003",
-        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "@validFrom": "2026-07-01T00:00:00Z",
+        "@validTo": "2026-07-01T00:00:01Z",
         "building": "yes"
       }
     },
@@ -90,9 +93,32 @@
       },
       "properties": {
         "@osmId": "relation/100000004",
-        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "@validFrom": "2026-07-01T00:00:00Z",
+        "@validTo": "2026-07-01T00:00:01Z",
         "building": "synagogue",
         "name": "Test Synagogue"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [34.820, 32.120],
+            [34.821, 32.120],
+            [34.821, 32.121],
+            [34.820, 32.121],
+            [34.820, 32.120]
+          ]
+        ]
+      },
+      "properties": {
+        "@osmId": "way/100000005",
+        "@validFrom": "2026-07-01T00:00:00.712Z",
+        "@validTo": "2026-07-01T00:00:01Z",
+        "building": "office",
+        "name": "Edited inside the query tail -- must be excluded"
       }
     }
   ]

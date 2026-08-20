@@ -19,7 +19,9 @@ def test_build_request_payload_shape():
     payload = ohsome_client.build_request_payload(AOI_GEOMETRY, requested_time)
 
     assert payload["filter"] == "building=* and geometry:polygon"
-    assert payload["time"] == "2026-07-01T00:00:00Z"
+    # Minimal-width range starting at requested_time -- see ohsome_client's
+    # module docstring for why this is a range, not a single instant.
+    assert payload["time"] == "2026-07-01T00:00:00Z,2026-07-01T00:00:01Z"
     assert payload["properties"] == "tags"
 
     bpolys = json.loads(payload["bpolys"])
@@ -35,7 +37,7 @@ def test_build_request_payload_converts_to_utc():
 
     payload = ohsome_client.build_request_payload(AOI_GEOMETRY, requested_time)
 
-    assert payload["time"] == "2026-07-01T00:00:00Z"
+    assert payload["time"] == "2026-07-01T00:00:00Z,2026-07-01T00:00:01Z"
 
 
 def test_build_request_payload_rejects_naive_datetime():
