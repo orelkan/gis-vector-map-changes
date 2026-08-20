@@ -1,0 +1,99 @@
+{
+  "attribution": {
+    "url": "https://ohsome.org/copyrights",
+    "text": "© OpenStreetMap contributors"
+  },
+  "apiVersion": "1.10.4",
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [34.780, 32.080],
+            [34.781, 32.080],
+            [34.781, 32.081],
+            [34.780, 32.081],
+            [34.780, 32.080]
+          ]
+        ]
+      },
+      "properties": {
+        "@osmId": "way/100000001",
+        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "building": "house",
+        "name": "Test House"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [34.790, 32.090],
+            [34.794, 32.090],
+            [34.794, 32.094],
+            [34.790, 32.094],
+            [34.790, 32.090]
+          ],
+          [
+            [34.791, 32.091],
+            [34.791, 32.092],
+            [34.792, 32.092],
+            [34.792, 32.091],
+            [34.791, 32.091]
+          ]
+        ]
+      },
+      "properties": {
+        "@osmId": "way/100000002",
+        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "building": "apartments"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [34.800, 32.100],
+            [34.802, 32.102],
+            [34.802, 32.100],
+            [34.800, 32.102],
+            [34.800, 32.100]
+          ]
+        ]
+      },
+      "properties": {
+        "@osmId": "way/100000003",
+        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "building": "yes"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [34.810, 32.110],
+            [34.811, 32.110],
+            [34.811, 32.111],
+            [34.810, 32.111],
+            [34.810, 32.110]
+          ]
+        ]
+      },
+      "properties": {
+        "@osmId": "relation/100000004",
+        "@snapshotTimestamp": "2026-07-01T00:00:00Z",
+        "building": "synagogue",
+        "name": "Test Synagogue"
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+.venv/
+.airflow_home/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Airflow local runtime (created by docker-compose volumes)
+logs/
+plugins/
+config/airflow.cfg
+config/webserver_config.py
+
+# Local env / secrets
+.env
+
+# OS
+.DS_Store

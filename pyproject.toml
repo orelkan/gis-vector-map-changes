@@ -1,0 +1,36 @@
+[project]
+name = "gis-vector-map-changes"
+version = "0.1.0"
+description = "Educational vector-GIS data platform for detecting and explaining changes between dated map snapshots of Tel Aviv-Yafo."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  # Airflow itself is installed separately via `make install`, using the
+  # official constraints file for this exact version (see Makefile) --
+  # that is the only supported way to get compatible provider versions.
+  # Pinned here for documentation / `pip list` visibility only.
+  "apache-airflow[amazon,postgres]==3.3.1",
+  "geopandas==1.1.4",
+  "shapely==2.1.2",
+  "pyproj==3.7.2",
+  "requests==2.34.2",
+  "psycopg[binary]==3.3.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "ruff==0.16.3",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+  "integration: hits a real external service (network required, not run by default)",
+  "db: requires a real local Postgres (see Makefile `make up`)",
+]
+addopts = "-m 'not integration and not db'"
