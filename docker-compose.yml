@@ -190,12 +190,16 @@ services:
         # per CLAUDE.md: "Store credentials in Airflow Connections... never
         # in source control." Values come from .env via env_file above.
         # `|| true` makes this safe to re-run (connection already exists).
-        /entrypoint airflow connections add minio_default \
+        # Connection *names* (not the credentials behind them) come from
+        # .env too, matching what dags/ingest_osm_building_snapshots.py
+        # reads -- keeps the two sides bound to the same names without
+        # duplicating them as separate hardcoded strings.
+        /entrypoint airflow connections add "$$MINIO_AIRFLOW_CONN_ID" \
           --conn-type aws \
           --conn-extra "{\"aws_access_key_id\": \"$$MINIO_ROOT_USER\", \"aws_secret_access_key\": \"$$MINIO_ROOT_PASSWORD\", \"endpoint_url\": \"http://minio:9000\"}" \
           || true
 
-        /entrypoint airflow connections add gis_postgres_default \
+        /entrypoint airflow connections add "$$GIS_POSTGRES_AIRFLOW_CONN_ID" \
           --conn-type postgres \
           --conn-host postgres \
           --conn-port 5432 \

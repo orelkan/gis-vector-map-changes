@@ -46,8 +46,12 @@ DEFAULT_REQUESTED_TIMES = [
 ]
 
 MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "gis-vector-map-changes")
-AWS_CONN_ID = "minio_default"
-POSTGRES_CONN_ID = "gis_postgres_default"
+# Connection *names*, not credentials -- the actual secrets behind them live
+# in Airflow's own encrypted Connection store, created from .env by
+# airflow-init in docker-compose.yml (same env vars, so the two stay bound
+# to the same names without hardcoding them twice).
+AWS_CONN_ID = os.environ.get("MINIO_AIRFLOW_CONN_ID", "minio_default")
+POSTGRES_CONN_ID = os.environ.get("GIS_POSTGRES_AIRFLOW_CONN_ID", "gis_postgres_default")
 
 
 @dag(
@@ -75,7 +79,10 @@ def ingest_osm_building_snapshots():
     @task
     def get_requested_times() -> list[str]:
         context = get_current_context()
-        return context["params"]["requested_times"]
+        # Airflow's Context TypedDict marks "params" as not required, even
+        # though it's always populated for a running task -- .get() with a
+        # default satisfies the type checker without changing behavior.
+        return context.get("params", {})["requested_times"]
 
     @task(
         retries=3,
@@ -84,7 +91,7 @@ def ingest_osm_building_snapshots():
     )
     def fetch_and_persist_snapshot(requested_time_str: str) -> dict:
         context = get_current_context()
-        params = context["params"]
+        params = context.get("params", {})  # see get_requested_times() for why .get()
 
         aoi = load_aoi()
         if aoi.aoi_version != params["aoi_version"]:
@@ -166,7 +173,11 @@ def ingest_osm_building_snapshots():
 
     requested_times = get_requested_times()
     results = fetch_and_persist_snapshot.expand(requested_time_str=requested_times)
-    summarize(results)
+    # `results` is an XComArg (the mapped task's future output at runtime),
+    # not a real list -- summarize()'s `list[dict]` annotation describes
+    # what it receives once Airflow resolves it, which static analysis
+    # can't see through. Inherent to TaskFlow cross-task typing.
+    summarize(results)  # type: ignore[reportArgumentType]
 
 
 ingest_osm_building_snapshots()
