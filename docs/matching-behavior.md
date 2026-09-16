@@ -1,6 +1,7 @@
 # Matching & classification: defined behavior
 
-Status: **specification — agreed, not yet implemented.**
+Status: **implemented and verified against the real ingested snapshots
+(2026-09-16).** See §7 for the acceptance results.
 
 CLAUDE.md requires that expected behavior be defined *before* matching is
 built:
@@ -195,7 +196,16 @@ shrinking building. Comparing different `aoi_version`s is a hard error.
 
 ## 7. Expected outputs (acceptance test for the implementation)
 
-**Monthly (2026-06-01 → 2026-07-01)** — exact:
+**Status: implemented and run against the real snapshots (2026-09-16).**
+Every number below is what the real `build_changesets` DAG actually
+produced, cross-checked against the predictions made while writing this
+spec -- both changesets' counts satisfy the consistency equations exactly,
+and every spot-checked `osm_id` (the re-traced block, both ambiguous pairs)
+matches its predicted IoU to four decimal places. See
+[README.md](../README.md) for the run details.
+
+**Monthly (2026-06-01 → 2026-07-01)** — exact, matches the pre-implementation
+prediction with zero discrepancy:
 
 | class | count |
 |---|---|
@@ -210,16 +220,38 @@ shrinking building. Comparing different `aoi_version`s is a hard error.
 Consistency: 26,944+30+4+0 = 26,978 ID-matched; +18 removed = 26,996 (A);
 +4 added = 26,982 (B).
 
-**Yearly (2025-07-01 → 2026-07-01):** `added` 72, `removed` 103, `ambiguous` 2,
-`modified_attributes` 129, ID-matched 26,908. The unchanged/modified_geometry
-split is ≈26,629 / ≈145 — exact figures depend on how the 14 high-IoU (≥0.99)
-pairs intersect the 6 both-changed pairs, and are pinned as assertions during
-implementation.
+**Yearly (2025-07-01 → 2026-07-01)** — exact:
 
-Per CLAUDE.md ("avoid tests that assert only row counts"), tests also assert
-specific `osm_id`s and their classifications — e.g. `way/149268397` is
-`modified_geometry` with `iou≈0.119`, `centroid_shift_m≈9.72`;
-`way/506832165` is `ambiguous`/`partial_overlap`.
+| class | count |
+|---|---|
+| `unchanged` | 26,628 |
+| `modified_geometry` | 145 |
+| `modified_attributes` | 130 |
+| `modified_geometry_and_attributes` | 5 |
+| `added` | 72 |
+| `removed` | 103 |
+| `ambiguous` | 2 |
+
+Consistency: 26,628+145+130+5 = 26,908 ID-matched (matches §1's measured
+26,908 exactly); +103 removed +2 ambiguous (both 1:1 `partial_overlap`
+pairs, one A-id each) = 27,013 (A); +72 added +2 ambiguous = 26,982 (B). The
+pre-implementation estimate in an earlier draft of this section
+("`modified_attributes` ≈129") undercounted by one tag-changed feature that
+also had its geometry change -- 130 + 5 = 135 total attrs-changed, which
+does match §1's raw baseline measurement exactly. The unchanged/
+modified_geometry split (≈26,629/≈145 estimated) landed at 26,628/145,
+within the margin the estimate flagged as undetermined.
+
+Both ambiguous records are exactly the two pairs identified in §1's
+real-data analysis: `way/488475407` ~ `relation/19933969` (iou=0.0636) and
+`way/506832165` ~ `way/1427652677` (iou=0.2230). `way/149268397` (the
+re-traced block) is `modified_geometry` with iou=0.1193,
+iou_centroid_aligned=0.6904, centroid_shift_m=9.72, area_ratio=0.69 --
+matching the prediction in §1 exactly.
+
+Per CLAUDE.md ("avoid tests that assert only row counts"), the test suite
+also asserts specific `osm_id`s and their classifications, not just these
+totals -- see tests/matching/.
 
 ---
 

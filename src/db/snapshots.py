@@ -18,6 +18,11 @@ class SnapshotRow(NamedTuple):
     created: bool  # True if this call inserted a new row, False if it already existed
 
 
+class SnapshotLookup(NamedTuple):
+    id: int
+    processed_object_uri: str
+
+
 _UPSERT_SQL = """
     INSERT INTO snapshots (
         source, source_query_version, layer, aoi_id, aoi_version, requested_time,
@@ -33,6 +38,13 @@ _UPSERT_SQL = """
 
 _SELECT_EXISTING_SQL = """
     SELECT id, ingestion_time FROM snapshots
+    WHERE source = %(source)s AND source_query_version = %(source_query_version)s
+      AND layer = %(layer)s AND aoi_id = %(aoi_id)s AND aoi_version = %(aoi_version)s
+      AND requested_time = %(requested_time)s
+"""
+
+_GET_SQL = """
+    SELECT id, processed_object_uri FROM snapshots
     WHERE source = %(source)s AND source_query_version = %(source_query_version)s
       AND layer = %(layer)s AND aoi_id = %(aoi_id)s AND aoi_version = %(aoi_version)s
       AND requested_time = %(requested_time)s
@@ -61,3 +73,18 @@ def upsert_snapshot(connection: Any, params: dict) -> SnapshotRow:
         existing = cursor.fetchone()
         connection.commit()
         return SnapshotRow(id=existing[0], ingestion_time=existing[1], created=False)
+
+
+def get_snapshot(connection: Any, params: dict) -> SnapshotLookup | None:
+    """Look up an existing snapshot by its natural key. Returns None if no
+    such snapshot has been ingested -- callers (e.g. the matching DAG,
+    which needs a snapshot to already exist) should fail loudly on that
+    rather than silently skip.
+
+    `params` keys: source, source_query_version, layer, aoi_id, aoi_version,
+    requested_time -- the same natural-key fields upsert_snapshot takes.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(_GET_SQL, params)
+        row = cursor.fetchone()
+    return SnapshotLookup(id=row[0], processed_object_uri=row[1]) if row else None

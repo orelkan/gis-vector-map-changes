@@ -4,21 +4,25 @@ Educational vector-GIS data platform for detecting and explaining changes
 between dated map snapshots of Tel Aviv-Yafo. See `CLAUDE.md` for full
 project scope, working agreement, and architecture rules.
 
-## Current milestone: ingestion
+## Milestones
 
-Fetches three dated Tel Aviv-Yafo building snapshots from OpenStreetMap (via
+**1. Ingestion** (`dags/ingest_osm_building_snapshots.py`, `src/ingestion/`):
+fetches three dated Tel Aviv-Yafo building snapshots from OpenStreetMap (via
 the [ohsome API](https://docs.ohsome.org/ohsome-api/v1/)), validates and
 normalizes them, and persists them durably (MinIO object storage + Postgres
 metadata).
 
-## Next milestone: matching & classification
-
-Not implemented. Its behavior is **specified and agreed** first, per
-CLAUDE.md's requirement to define expected behavior before implementing
-matching -- see [docs/matching-behavior.md](docs/matching-behavior.md). That
-document derives every threshold from measurement of the real ingested
-snapshots, and records the expected output of the pipeline as an acceptance
-test.
+**2. Matching & classification** (`dags/build_changesets.py`,
+`src/matching/`): compares pairs of snapshots and classifies every building
+as `added`/`removed`/`modified_geometry`/`modified_attributes`/
+`modified_geometry_and_attributes`/`unchanged`/`ambiguous`. Behavior was
+specified *before* implementation, per CLAUDE.md's requirement -- see
+[docs/matching-behavior.md](docs/matching-behavior.md), which derives every
+threshold from measurement of the real ingested snapshots and records the
+expected output as an acceptance test. **Implemented and verified**: a real
+run against the ingested snapshots reproduced every predicted count exactly
+(see docs/matching-behavior.md section 7) and spot-checked individual
+`osm_id`s matched their predicted metrics to four decimal places.
 
 ## Data source and licensing
 
@@ -55,9 +59,14 @@ relies on for `airflow-init` sequencing).
 - Airflow UI: http://localhost:8080 (`_AIRFLOW_WWW_USER_USERNAME` / `_PASSWORD` from `.env`)
 - MinIO console: http://localhost:9001 (`MINIO_ROOT_USER` / `_PASSWORD` from `.env`)
 
-Trigger the `ingest_osm_building_snapshots` DAG manually from the UI (or
-`airflow dags trigger ingest_osm_building_snapshots`) -- it's not scheduled;
-see the DAG's docstring for why.
+Trigger `ingest_osm_building_snapshots` first (neither DAG is scheduled --
+see each DAG's docstring for why), then `build_changesets` once those
+snapshots exist:
+
+```bash
+airflow dags trigger ingest_osm_building_snapshots
+airflow dags trigger build_changesets   # needs the snapshots above to exist
+```
 
 ## Tests
 
@@ -134,3 +143,24 @@ Snapshot dates default to `2025-07-01` / `2026-06-01` / `2026-07-01`, not
 the `2025-08-01` / `2026-07-01` / `2026-08-01` originally discussed --
 shifted back one month after `GET /v1/metadata` showed ohsome's data extent
 only reaches `2026-07-27T09:00Z`, keeping the same 1-month/1-year spacing.
+
+## Matching verified end-to-end (2026-09-16)
+
+`build_changesets` was run for real against the `v2` snapshots (Docker, not
+just designed against the spec). Both comparison pairs reproduced
+[docs/matching-behavior.md](docs/matching-behavior.md) section 7's
+predictions exactly:
+
+| pair | unchanged | modified_geometry | modified_attributes | modified_geometry_and_attributes | added | removed | ambiguous |
+|---|---|---|---|---|---|---|---|
+| monthly (2026-06-01 → 2026-07-01) | 26,944 | 30 | 4 | 0 | 4 | 18 | 0 |
+| yearly (2025-07-01 → 2026-07-01) | 26,628 | 145 | 130 | 5 | 72 | 103 | 2 |
+
+Spot-checked individually, not just by count: both `ambiguous` records are
+exactly the two cross-id overlaps found during spec analysis
+(`way/488475407`~`relation/19933969` at iou=0.0636,
+`way/506832165`~`way/1427652677` at iou=0.2230), and the re-traced block's
+`way/149268397` came back `modified_geometry` with iou=0.1193,
+iou_centroid_aligned=0.6904, centroid_shift_m=9.72 -- matching the spec's
+predictions to four decimal places. Idempotency verified for real too:
+re-triggering left the `changesets` table at 2 rows.

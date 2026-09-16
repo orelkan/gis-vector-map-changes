@@ -82,3 +82,19 @@ def test_upsert_snapshot_different_aoi_version_creates_separate_row(db_connectio
     second = snapshots_db.upsert_snapshot(db_connection, _params(aoi_version="v2"))
 
     assert first.id != second.id
+
+
+def test_get_snapshot_returns_none_when_not_found(db_connection):
+    result = snapshots_db.get_snapshot(db_connection, _params(requested_time=datetime(2099, 1, 1, tzinfo=UTC)))
+
+    assert result is None
+
+
+def test_get_snapshot_finds_existing_row_by_natural_key(db_connection):
+    upserted = snapshots_db.upsert_snapshot(db_connection, _params())
+
+    found = snapshots_db.get_snapshot(db_connection, _params())
+
+    assert found is not None
+    assert found.id == upserted.id
+    assert found.processed_object_uri == "s3://bucket/processed.geojson"
