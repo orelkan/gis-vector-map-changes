@@ -9,8 +9,16 @@ project scope, working agreement, and architecture rules.
 Fetches three dated Tel Aviv-Yafo building snapshots from OpenStreetMap (via
 the [ohsome API](https://docs.ohsome.org/ohsome-api/v1/)), validates and
 normalizes them, and persists them durably (MinIO object storage + Postgres
-metadata). Matching/classification (added/removed/modified/unchanged/
-ambiguous) is a separate, later milestone -- not implemented yet.
+metadata).
+
+## Next milestone: matching & classification
+
+Not implemented. Its behavior is **specified and agreed** first, per
+CLAUDE.md's requirement to define expected behavior before implementing
+matching -- see [docs/matching-behavior.md](docs/matching-behavior.md). That
+document derives every threshold from measurement of the real ingested
+snapshots, and records the expected output of the pipeline as an acceptance
+test.
 
 ## Data source and licensing
 
@@ -107,6 +115,20 @@ invalid-then-repaired geometries out of that count):
 
 Idempotency was also verified for real: re-triggering the DAG with the same
 `requested_times` left the `snapshots` table at 3 rows (no duplicates).
+
+### `source_query_version` v2 (2026-09-16)
+
+Analysis while specifying the matching milestone found that `make_valid`
+could return a **GeometryCollection** (recovered polygon + zero-area
+LineString "spikes") for 3 of 26,982 features, breaking the
+"snapshots contain Polygon/MultiPolygon" invariant that matching and a
+PostGIS polygonal column depend on. `src/ingestion/validate.py` now keeps
+only polygonal parts after repair (`repair_method=
+"make_valid+extract_polygons"`), and the default `source_query_version` is
+`v2`. Re-running ingestion produced identical feature counts and a **0.000000
+m² total area delta** across all features -- it is purely a type
+normalization. The v1 rows are retained, per CLAUDE.md's rule that a changed
+extraction definition creates a new version rather than rewriting history.
 
 Snapshot dates default to `2025-07-01` / `2026-06-01` / `2026-07-01`, not
 the `2025-08-01` / `2026-07-01` / `2026-08-01` originally discussed --

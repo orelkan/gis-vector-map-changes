@@ -68,10 +68,12 @@ POSTGRES_CONN_ID = os.environ.get("GIS_POSTGRES_AIRFLOW_CONN_ID", "gis_postgres_
         ),
         "aoi_version": Param("v1", type="string"),
         "source_query_version": Param(
-            "v1",
+            "v2",
             type="string",
-            description="Version of our extraction definition (ohsome filter + extracted tags). "
-            "Bump when that logic changes.",
+            description="Version of our extraction definition (ohsome filter + extracted tags + "
+            "geometry normalization). Bump when that logic changes. "
+            "v2: repair now keeps only polygonal parts, so snapshots are "
+            "always Polygon/MultiPolygon (v1 could emit GeometryCollection).",
         ),
     },
 )

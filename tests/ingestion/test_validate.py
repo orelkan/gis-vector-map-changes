@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from shapely.geometry import Polygon
 
 from src.ingestion import validate
@@ -56,3 +57,40 @@ def test_self_intersecting_bowtie_polygon_is_repaired():
     # Original (invalid) geometry must be preserved separately, unmodified.
     assert result.original_geometry.equals(bowtie)
     assert not result.geometry.equals(result.original_geometry)
+
+
+def test_repair_keeps_only_polygonal_parts():
+    # A square with a zero-area "spike" along the top edge: make_valid
+    # recovers the square but also emits the spike as a dangling LineString,
+    # yielding a GeometryCollection. Reproduces the real shape of
+    # relation/14011822 & relation/14011825 in the ingested Tel Aviv-Yafo
+    # snapshots -- see docs/matching-behavior.md.
+    spiked = Polygon([(0, 0), (10, 0), (10, 10), (15, 10), (10, 10), (0, 10), (0, 0)])
+    assert spiked.is_valid is False
+
+    from shapely.validation import make_valid
+
+    assert make_valid(spiked).geom_type == "GeometryCollection"  # the problem we're fixing
+
+    result = validate.validate_and_repair(spiked)
+
+    # The invariant downstream matching (and a PostGIS polygonal column)
+    # depends on: snapshots only ever contain Polygon/MultiPolygon.
+    assert result.geometry.geom_type in validate.POLYGONAL_TYPES
+    assert result.repair_method == validate.REPAIR_METHOD_MAKE_VALID_EXTRACT
+    assert result.repaired_valid is True
+    # The zero-area spike carried no area, so dropping it must not change area.
+    assert result.geometry.area == pytest.approx(100.0)
+    assert result.original_geometry.equals(spiked)
+
+
+def test_repair_without_extraction_keeps_plain_method_label():
+    # A bowtie repairs straight to a MultiPolygon -- nothing non-polygonal to
+    # strip, so the method label must stay the plain one rather than claiming
+    # an extraction that didn't happen.
+    bowtie = Polygon([(0, 0), (2, 2), (2, 0), (0, 2), (0, 0)])
+
+    result = validate.validate_and_repair(bowtie)
+
+    assert result.geometry.geom_type in validate.POLYGONAL_TYPES
+    assert result.repair_method == validate.REPAIR_METHOD_MAKE_VALID
