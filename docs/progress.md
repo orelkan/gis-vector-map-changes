@@ -169,6 +169,52 @@ http://localhost:5173. Click `way/149268397` in the 1-year interval to
 confirm the before/after overlay and the "moved ~9.7 m" explanation render
 as intended.
 
+**Default-selected interval showed no map highlights on page load -- found
+and fixed (2026-09-22).** Reported by the user: the changeset selected by
+default on load (whichever the API returns first, e.g. the 1-month interval)
+never showed its coloured change layer on the map, and reselecting the same
+interval did nothing (an unchanged React state value is a no-op, as
+expected) -- only switching to a *different* interval and back made it
+appear. Root cause was `MapView.tsx` gating `addSource`/`addLayer` calls on
+`map.isStyleLoaded()`. Per MapLibre's own source
+(`Style#loaded()`), that method requires every current source's *tiles* to
+have finished downloading, not just the style spec being parsed -- so at
+the moment `changesetId` first becomes non-null (typically while the base
+map's own vector tiles for the current view are still in flight),
+`isStyleLoaded()` is false, a `styledata` listener gets registered to retry,
+but the specific event transition where `isStyleLoaded()` finally flips true
+does not reliably fire as a *new* `styledata` event for a late listener --
+so the listener's callback simply never ran again, silently, with no
+exception. Fixed by switching to MapLibre's `style.load` event (fires once
+the style spec/sources/layers are structurally parsed, independent of tile
+downloads) tracked via a `styleReady` state flag, rather than polling
+`isStyleLoaded()`. Verified via Chrome DevTools Protocol on a fresh page
+load with no interaction: the `changes-fill`/`changes-outline` layers and
+their tile source now exist immediately.
+
+**Hovering a wide timeline bracket blocked clicking the row below --
+found and fixed (2026-09-22).** Reported by the user: hovering "5 years" (a
+full-width bracket) prevented comfortably clicking the "1 year" brackets
+underneath. Cause: MUI `Tooltip`'s default "bottom" placement pops the
+tooltip bubble directly over the row beneath the hovered element, which for
+a full-width bracket covers the entire next row. Fixed by removing
+per-bracket tooltips entirely in favour of a persistent caption below the
+whole track, driven by hover-or-selection state -- informative without ever
+sitting on top of anything clickable. Verified via CDP: dispatching a
+hover on "5 years" and then checking `document.elementFromPoint` at each
+"1 year" button's centre confirms every one of them is still its own
+top-level hit target.
+
+A test suite regression surfaced alongside the first fix and was fixed
+too: `App.test.tsx`'s "loads change detail" test called the map's
+`onSelectChange` callback without first waiting for the `listChangesets()`
+fetch to actually settle -- racing against the effect that clears `change`
+whenever `selectedChangesetId` changes. It had been passing by lucky
+timing; unrelated render-count changes elsewhere tipped the race until it
+failed consistently. Fixed by waiting for `mapProps.at(-1)?.changesetId` to
+reach its expected value before firing the selection, in both tests that
+do this.
+
 ---
 
 ## Concrete next steps

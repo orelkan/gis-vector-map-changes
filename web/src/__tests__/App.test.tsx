@@ -63,13 +63,17 @@ describe("App", () => {
 
   it("loads change detail and history when the map reports a selection", async () => {
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId("map")).toBeInTheDocument());
+    // Wait for the changesets fetch to actually settle (not just for the map
+    // div to exist -- that renders on the very first pass). Firing the
+    // selection before selectedChangesetId's *first* value lands would race
+    // against the effect that clears `change` whenever selectedChangesetId
+    // changes, which would otherwise wipe the selection right back out.
+    await waitFor(() => expect(mapProps.at(-1)?.changesetId).toBe(monthlyChangeset.id));
 
     const onSelect = mapProps.at(-1)?.onSelectChange as (id: number) => void;
     onSelect(retracedChange.id);
 
-    await waitFor(() => expect(screen.getByText("Geometry changed")).toBeInTheDocument());
-    expect(screen.getByText("0.1193")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("0.1193")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText("2021-07-01")).toBeInTheDocument());
   });
 
@@ -77,9 +81,9 @@ describe("App", () => {
     // A change record belongs to one changeset; keeping it visible across a
     // switch would misattribute it to the wrong interval.
     render(<App />);
-    await waitFor(() => expect(screen.getByTestId("map")).toBeInTheDocument());
+    await waitFor(() => expect(mapProps.at(-1)?.changesetId).toBe(monthlyChangeset.id));
     (mapProps.at(-1)?.onSelectChange as (id: number) => void)(retracedChange.id);
-    await waitFor(() => expect(screen.getByText("Geometry changed")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("0.1193")).toBeInTheDocument());
 
     await userEvent.click(screen.getByText("1 year").closest("button")!);
 

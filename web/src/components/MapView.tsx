@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LngLatBounds,
   Map as MapLibreMap,
@@ -70,6 +70,18 @@ export function MapView({
   // requested. React StrictMode's double-invoked effects make that easy to
   // hit.
   const appliedStyleKey = useRef<string | null>(null);
+  // Whether the *current* style has fired its one-time "style.load" event --
+  // i.e. its sources/layers are structurally in place and it is safe to
+  // addSource/addLayer. This is deliberately not `map.isStyleLoaded()`:
+  // that method (per MapLibre's own Style#loaded()) also requires every
+  // current source's *tiles* to have finished downloading, so the
+  // `styledata` event that eventually flips it true does not reliably fire
+  // again for a listener registered after the fact -- which silently
+  // dropped the very first-selected changeset's layer on page load (no
+  // exception, just a build() that never ran). `style.load` fires once the
+  // style spec/sources/layers are parsed, independent of tile downloads,
+  // which is the actual precondition for addSource/addLayer.
+  const [styleReady, setStyleReady] = useState(false);
   // Kept in a ref so the click handler, registered once, always calls the
   // latest callback without needing to be re-bound.
   const onSelect = useRef(onSelectChange);
@@ -89,10 +101,12 @@ export function MapView({
     instance.addControl(new ScaleControl({ unit: "metric" }), "bottom-left");
     map.current = instance;
     appliedStyleKey.current = `${mode}:${basemap}`;
+    instance.once("style.load", () => setStyleReady(true));
     return () => {
       instance.remove();
       map.current = null;
       appliedStyleKey.current = null;
+      setStyleReady(false);
     };
     // Only the initial mode/basemap are used here; changes are handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -108,13 +122,15 @@ export function MapView({
     // where the constructor has just set it.
     if (!instance || appliedStyleKey.current === key) return;
     appliedStyleKey.current = key;
+    setStyleReady(false);
     instance.setStyle(styleFor(mode, basemap));
+    instance.once("style.load", () => setStyleReady(true));
   }, [mode, basemap]);
 
   // (Re)build our layers on top of whatever basemap style is current.
   useEffect(() => {
     const instance = map.current;
-    if (!instance) return;
+    if (!instance || !styleReady) return;
 
     const build = () => {
       if (contextSnapshotId !== null && !instance.getSource(CONTEXT_SOURCE)) {
@@ -196,22 +212,8 @@ export function MapView({
       }
     };
 
-    if (instance.isStyleLoaded()) {
-      build();
-      return;
-    }
-    // Not `once`: if the style finished loading before this effect ran, a
-    // one-shot listener would never fire and no layers would be added.
-    const onStyleData = () => {
-      if (!instance.isStyleLoaded()) return;
-      build();
-      instance.off("styledata", onStyleData);
-    };
-    instance.on("styledata", onStyleData);
-    return () => {
-      instance.off("styledata", onStyleData);
-    };
-  }, [mode, basemap, changesetId, contextSnapshotId, visibleClassifications]);
+    build();
+  }, [styleReady, mode, basemap, changesetId, contextSnapshotId, visibleClassifications]);
 
   // Update the change tile URL when the interval or filter changes, without
   // tearing down the map.
