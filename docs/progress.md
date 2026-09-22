@@ -131,15 +131,43 @@ React + TypeScript + MapLibre + MUI viewer over PostGIS vector tiles.
 - Full suite green: 118 offline Python tests, 41 db tests, 22 frontend tests
   (181 total), ruff clean, `tsc --noEmit` clean, production build succeeds.
 
-**Not verifiable headlessly (unresolved — needs a human with a real
-browser):** MapLibre selects tiles inside its `requestAnimationFrame` render
-loop, which headless Chrome does not run. A headless screenshot shows the
-map canvas unpainted (flat colour, no tile requests) even though style,
-sprites, and attribution all load and the tile endpoints are independently
-verified by decoding their output. Confirm the map actually paints and pans
-in a real browser: `make up && make web`, then http://localhost:5173. Worth
-clicking `way/149268397` in the 1-year interval to confirm the before/after
-overlay and the "moved ~9.7 m" explanation render as intended.
+**Map canvas rendered black — found and fixed (2026-09-22).** The earlier
+claim in this file that headless Chrome cannot render the map (because
+MapLibre selects tiles inside its `requestAnimationFrame` loop) was wrong and
+masked a real bug: the user saw a solid black map area in a real browser,
+with DOM overlay controls (nav buttons, scale bar, attribution) working
+normally. Root cause, confirmed via Chrome DevTools Protocol (`Network.
+enable` + polling pending requests, then `window.__map` introspection):
+Vite's dependency optimizer pre-bundles `maplibre-gl` but does not correctly
+rewrite the import inside the module Worker MapLibre spawns for tile/
+protobuf parsing, so `node_modules/.vite/deps/maplibre-gl-worker.mjs` 404s
+and that request hangs forever. The worker never responds, no tile ever
+finishes decoding, `map.isStyleLoaded()` stays `false` indefinitely, and
+nothing is ever painted -- with no console error, because the failure is a
+silently-stuck fetch, not a thrown exception. `get.webgl.org` rendering fine
+in the same browser ruled out a GPU/driver problem before this was found.
+
+Fixed in `web/vite.config.ts` by adding `optimizeDeps: { exclude:
+["maplibre-gl"] }`, which makes Vite serve the package unbundled so the
+worker's internal import resolves. Verified visually after the fix (headless
+screenshot, `Emulation.setDeviceMetricsOverride` + `Page.captureScreenshot`
+after a real wait): full Tel Aviv-Yafo basemap renders -- coastline, road
+network, and neighbourhood labels all visible. This also means headless
+verification of the map canvas is possible after all (new headless Chrome
+does run the render loop); the "not verifiable headlessly" claim in earlier
+drafts of this file should not be trusted for future map-rendering checks.
+
+A second, unrelated bug was found investigating this: clicking the map
+before the `changes-fill` layer exists (e.g. immediately after switching
+interval, before the new layer is added) threw
+`queryRenderedFeatures ... does not exist in the map's style` instead of a
+no-op. Fixed in `web/src/components/MapView.tsx`'s click handler with an
+`instance.getLayer(...)` guard.
+
+Still worth confirming in your own browser: `make web`, then
+http://localhost:5173. Click `way/149268397` in the 1-year interval to
+confirm the before/after overlay and the "moved ~9.7 m" explanation render
+as intended.
 
 ---
 

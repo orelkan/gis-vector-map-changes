@@ -215,6 +215,7 @@ export function MapView({
     const instance = map.current;
     if (!instance) return;
     const handleClick = (event: MapMouseEvent) => {
+      if (!instance.getLayer(`${CHANGE_SOURCE}-fill`)) return;
       const hits: MapGeoJSONFeature[] = instance.queryRenderedFeatures(event.point, {
         layers: [`${CHANGE_SOURCE}-fill`],
       });
