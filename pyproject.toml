@@ -14,12 +14,21 @@ dependencies = [
   "pyproj==3.7.2",
   "requests==2.34.2",
   "psycopg[binary]==3.3.4",
+  # Web API (milestone 3): serves vector tiles generated in PostGIS plus the
+  # JSON endpoints the React UI needs.
+  "fastapi==0.136.3",
+  "uvicorn[standard]==0.52.1",
+  "psycopg-pool==3.3.2",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest==9.1.1",
   "ruff==0.16.3",
+  # Decodes MVT in tests so tile assertions check real feature identity and
+  # properties rather than just byte length.
+  "mapbox-vector-tile==2.2.0",
+  "httpx==0.28.1",
 ]
 
 [tool.ruff]

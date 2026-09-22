@@ -1,4 +1,5 @@
-.PHONY: install up down logs migrate test test-integration test-db lint fmt dag-list
+.PHONY: install up down logs migrate test test-integration test-db lint fmt dag-list \
+        api-logs web web-install test-web
 
 VENV := .venv
 PYTHON := $(VENV)/bin/python
@@ -62,3 +63,17 @@ fmt:
 
 dag-list:
 	docker compose exec airflow-apiserver airflow dags list-import-errors
+
+api-logs:
+	docker compose logs -f api
+
+# The web UI runs on the host via Vite (fast HMR); the API it talks to runs
+# in the stack. `make up` must be running first.
+web-install:
+	cd web && npm install
+
+web:
+	cd web && npm run dev
+
+test-web:
+	cd web && npm run test -- --run

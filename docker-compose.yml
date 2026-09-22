@@ -225,6 +225,39 @@ services:
       minio-init:
         condition: service_completed_successfully
 
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    image: gis-vector-map-changes/api:0.1.0
+    env_file:
+      - ${ENV_FILE_PATH:-.env}
+    environment:
+      GIS_DB_HOST: postgres
+      GIS_DB_PORT: 5432
+      GIS_DB_NAME: ${GIS_DB_NAME:-gis}
+      GIS_DB_USER: ${GIS_DB_USER:-gis}
+      GIS_DB_PASSWORD: ${GIS_DB_PASSWORD:-gis}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:5173}
+    volumes:
+      # Bind-mounted so API edits are picked up by --reload without a rebuild,
+      # matching how src/ and dags/ are mounted for Airflow.
+      - ./api:/app/api:ro
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: always
+
 volumes:
   postgres-db-volume:
   minio-data:
