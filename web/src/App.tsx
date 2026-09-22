@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AppBar, Box, Button, CssBaseline, Dialog, DialogContent, DialogTitle,
+  AppBar, Box, CssBaseline, Dialog, DialogContent, DialogTitle,
   Divider, Drawer, IconButton, Link, Paper, Stack, ThemeProvider, Toolbar,
   Tooltip, Typography,
 } from "@mui/material";
@@ -105,14 +105,16 @@ export default function App() {
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               GIS Vector Map Changes — Tel Aviv-Yafo
             </Typography>
-            <Button
-              color="inherit"
-              startIcon={<InfoOutlinedIcon />}
-              onClick={() => setAboutOpen(true)}
-              sx={{ mr: 1 }}
-            >
-              About
-            </Button>
+            <Tooltip title="About">
+              <IconButton
+                color="inherit"
+                onClick={() => setAboutOpen(true)}
+                aria-label="About"
+                sx={{ mr: 1 }}
+              >
+                <InfoOutlinedIcon />
+              </IconButton>
+            </Tooltip>
             <Tooltip title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
               <IconButton color="inherit" onClick={toggle} aria-label="toggle color mode">
                 {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
@@ -125,8 +127,8 @@ export default function App() {
           <DialogTitle sx={{ fontWeight: 700 }}>GIS Vector Map Changes</DialogTitle>
           <DialogContent>
             <Typography variant="body2" sx={{ mb: 2 }}>
-              An educational vector-GIS data platform for detecting and explaining
-              changes between dated map snapshots of Tel Aviv-Yafo. It compares
+              A vector-GIS data platform for detecting and explaining changes
+              between dated map snapshots of Tel Aviv-Yafo. It compares
               OpenStreetMap building footprints across time, classifies what
               changed -- added, removed, moved, resurveyed, or edited -- and
               renders the result as vector tiles served from PostGIS.
