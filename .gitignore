@@ -17,3 +17,8 @@ config/webserver_config.py
 
 # OS
 .DS_Store
+
+# Web UI
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo

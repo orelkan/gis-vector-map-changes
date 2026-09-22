@@ -7,10 +7,11 @@ project scope, working agreement, and architecture rules.
 ## Milestones
 
 **1. Ingestion** (`dags/ingest_osm_building_snapshots.py`, `src/ingestion/`):
-fetches three dated Tel Aviv-Yafo building snapshots from OpenStreetMap (via
-the [ohsome API](https://docs.ohsome.org/ohsome-api/v1/)), validates and
+fetches dated Tel Aviv-Yafo building snapshots from OpenStreetMap (via the
+[ohsome API](https://docs.ohsome.org/ohsome-api/v1/)), validates and
 normalizes them, and persists them durably (MinIO object storage + Postgres
-metadata).
+metadata). Seven snapshots are currently ingested, annually from 2021-07-01
+plus 2026-06-01 and 2026-07-01.
 
 **2. Matching & classification** (`dags/build_changesets.py`,
 `src/matching/`): compares pairs of snapshots and classifies every building
@@ -23,6 +24,14 @@ expected output as an acceptance test. **Implemented and verified**: a real
 run against the ingested snapshots reproduced every predicted count exactly
 (see docs/matching-behavior.md section 7) and spot-checked individual
 `osm_id`s matched their predicted metrics to four decimal places.
+
+**3. Web UI** (`web/`, `api/`, `dags/publish_to_postgis.py`): a React +
+TypeScript viewer whose MapLibre map is driven by vector tiles generated in
+PostGIS (`ST_AsMVT`). Click a building to see what changed and how, filter
+by change type, switch between computed intervals (1 month / 1 year /
+5 years), and view any building's full history across all snapshots. See
+[docs/web-ui.md](docs/web-ui.md) -- in particular why per-interval change
+storage does **not** grow quadratically.
 
 ## Data source and licensing
 
@@ -65,7 +74,16 @@ snapshots exist:
 
 ```bash
 airflow dags trigger ingest_osm_building_snapshots
-airflow dags trigger build_changesets   # needs the snapshots above to exist
+airflow dags trigger build_changesets     # needs the snapshots above
+airflow dags trigger publish_to_postgis   # needs both of the above
+```
+
+Then start the web UI (the API runs in the stack; the UI runs on the host
+for fast HMR):
+
+```bash
+make web-install   # once
+make web           # http://localhost:5173
 ```
 
 ## Tests
@@ -74,6 +92,7 @@ airflow dags trigger build_changesets   # needs the snapshots above to exist
 make test              # fast, offline (fixtures/mocks only)
 make test-db            # needs `make up && make migrate` (real local Postgres)
 make test-integration    # hits the real ohsome API over the network
+make test-web            # frontend (vitest + React Testing Library)
 ```
 
 ## Verified end-to-end (2026-08-20)
