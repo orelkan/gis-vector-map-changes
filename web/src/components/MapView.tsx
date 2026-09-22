@@ -13,7 +13,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { Box, type PaletteMode } from "@mui/material";
 import { buildingTileUrl, changeTileUrl } from "../api/client";
 import type { Classification, ChangeDetail } from "../api/types";
-import { CLASSIFICATION_COLORS, basemapStyleUrl } from "../theme";
+import { CLASSIFICATION_COLORS, basemapStyleUrl, SATELLITE_STYLE, type BasemapChoice } from "../theme";
 
 // AOI centroid / bounds from aoi/tel_aviv_yafo_v1.geojson.
 const TEL_AVIV_CENTER: [number, number] = [34.7899, 32.0847];
@@ -30,11 +30,19 @@ const OVERLAY_SOURCE = "selected-outline";
 
 interface MapViewProps {
   mode: PaletteMode;
+  basemap: BasemapChoice;
   changesetId: number | null;
   contextSnapshotId: number | null;
   visibleClassifications: Classification[];
   selectedChange: ChangeDetail | null;
   onSelectChange: (changeFeatureId: number) => void;
+}
+
+/** The satellite style has no theme pairing of its own -- it stays whatever
+ *  imagery Esri serves regardless of light/dark mode -- so it doesn't need
+ *  a `mode` argument the way basemapStyleUrl does. */
+function styleFor(mode: PaletteMode, basemap: BasemapChoice) {
+  return basemap === "satellite" ? SATELLITE_STYLE : basemapStyleUrl(mode);
 }
 
 /** Style expression colouring each change by its classification -- one
@@ -46,6 +54,7 @@ function classificationColorExpression() {
 
 export function MapView({
   mode,
+  basemap,
   changesetId,
   contextSnapshotId,
   visibleClassifications,
@@ -54,12 +63,13 @@ export function MapView({
 }: MapViewProps) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<MapLibreMap | null>(null);
-  // The basemap the current map instance was built with. setStyle() must not
-  // be called for a mode the map already has -- doing so on a freshly
-  // constructed map whose initial style is still loading can leave MapLibre
-  // without a completed style, and then no tiles are ever requested. React
-  // StrictMode's double-invoked effects make that easy to hit.
-  const appliedMode = useRef<PaletteMode | null>(null);
+  // The basemap+mode combination the current map instance was built with.
+  // setStyle() must not be called for a style the map already has -- doing
+  // so on a freshly constructed map whose initial style is still loading can
+  // leave MapLibre without a completed style, and then no tiles are ever
+  // requested. React StrictMode's double-invoked effects make that easy to
+  // hit.
+  const appliedStyleKey = useRef<string | null>(null);
   // Kept in a ref so the click handler, registered once, always calls the
   // latest callback without needing to be re-bound.
   const onSelect = useRef(onSelectChange);
@@ -70,7 +80,7 @@ export function MapView({
     if (!container.current || map.current) return;
     const instance = new MapLibreMap({
       container: container.current,
-      style: basemapStyleUrl(mode),
+      style: styleFor(mode, basemap),
       center: TEL_AVIV_CENTER,
       zoom: DEFAULT_ZOOM,
       attributionControl: { compact: false },
@@ -78,26 +88,28 @@ export function MapView({
     instance.addControl(new NavigationControl(), "top-right");
     instance.addControl(new ScaleControl({ unit: "metric" }), "bottom-left");
     map.current = instance;
-    appliedMode.current = mode;
+    appliedStyleKey.current = `${mode}:${basemap}`;
     return () => {
       instance.remove();
       map.current = null;
-      appliedMode.current = null;
+      appliedStyleKey.current = null;
     };
-    // Only the initial mode is used here; theme changes are handled below.
+    // Only the initial mode/basemap are used here; changes are handled below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Swap the basemap when the theme changes. setStyle drops all custom
-  // layers, so they are rebuilt by the effect below once the new style loads.
+  // Swap the basemap when the theme or satellite toggle changes. setStyle
+  // drops all custom layers, so they are rebuilt by the effect below once
+  // the new style loads.
   useEffect(() => {
     const instance = map.current;
-    // Skip when the map already carries this basemap -- notably on mount,
+    const key = `${mode}:${basemap}`;
+    // Skip when the map already carries this style -- notably on mount,
     // where the constructor has just set it.
-    if (!instance || appliedMode.current === mode) return;
-    appliedMode.current = mode;
-    instance.setStyle(basemapStyleUrl(mode));
-  }, [mode]);
+    if (!instance || appliedStyleKey.current === key) return;
+    appliedStyleKey.current = key;
+    instance.setStyle(styleFor(mode, basemap));
+  }, [mode, basemap]);
 
   // (Re)build our layers on top of whatever basemap style is current.
   useEffect(() => {
@@ -199,7 +211,7 @@ export function MapView({
     return () => {
       instance.off("styledata", onStyleData);
     };
-  }, [mode, changesetId, contextSnapshotId, visibleClassifications]);
+  }, [mode, basemap, changesetId, contextSnapshotId, visibleClassifications]);
 
   // Update the change tile URL when the interval or filter changes, without
   // tearing down the map.

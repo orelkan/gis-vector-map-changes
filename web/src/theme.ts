@@ -1,4 +1,5 @@
 import { createTheme, type PaletteMode, type Theme } from "@mui/material";
+import type { StyleSpecification } from "maplibre-gl";
 import type { Classification } from "./api/types";
 
 /** Colours for the six stored classifications.
@@ -39,10 +40,38 @@ export function basemapStyleUrl(mode: PaletteMode): string {
     : "https://tiles.openfreemap.org/styles/positron";
 }
 
+/** Optional satellite imagery layer, chosen independently of the light/dark
+ *  UI theme. Esri World Imagery: no API key or billing account required
+ *  (matching the "no key/billing" bar the OpenFreeMap/MapLibre choice was
+ *  already held to), which is why it -- rather than Mapbox/Maxar/Bing
+ *  satellite, all of which need a key -- was picked here. Deliberately no
+ *  label layer on top: MapLibre's built-in AttributionControl already
+ *  picks up this source's `attribution` string automatically once it's the
+ *  active style, so no separate attribution wiring is needed. */
+export const SATELLITE_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {
+    satellite: {
+      type: "raster",
+      tiles: [
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: "Imagery © Esri, Maxar, Earthstar Geographics, GIS User Community",
+    },
+  },
+  layers: [{ id: "satellite", type: "raster", source: "satellite" }],
+};
+
+export type BasemapChoice = "map" | "satellite";
+
 export function buildTheme(mode: PaletteMode): Theme {
   return createTheme({
     palette: {
       mode,
+      primary: { main: mode === "light" ? "#00796b" : "#4db6ac" },
+      secondary: { main: mode === "light" ? "#ef6c00" : "#ffa726" },
       ...(mode === "light"
         ? { background: { default: "#f5f5f5", paper: "#ffffff" } }
         : { background: { default: "#121212", paper: "#1e1e1e" } }),

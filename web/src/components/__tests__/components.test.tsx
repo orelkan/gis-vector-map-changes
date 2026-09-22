@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { ThemeProvider } from "@mui/material";
 import { buildTheme } from "../../theme";
 import { CLASSIFICATIONS } from "../../api/types";
-import { ChangesetPicker } from "../ChangesetPicker";
+import { ChangesetTimeline } from "../ChangesetTimeline";
 import { ClassificationFilter } from "../ClassificationFilter";
 import { FeatureDetailPanel } from "../FeatureDetailPanel";
 import { FeatureTimeline } from "../FeatureTimeline";
@@ -16,30 +16,56 @@ function renderWith(ui: React.ReactElement, mode: "light" | "dark" = "light") {
   return render(<ThemeProvider theme={buildTheme(mode)}>{ui}</ThemeProvider>);
 }
 
-describe("ChangesetPicker", () => {
-  it("shows each interval's span label and change count", () => {
+describe("ChangesetTimeline", () => {
+  it("shows each interval's span label as a bracket on the track", () => {
     renderWith(
-      <ChangesetPicker
+      <ChangesetTimeline
         changesets={[monthlyChangeset, yearlyChangeset]}
         selectedId={monthlyChangeset.id}
         onChange={vi.fn()}
       />,
     );
     expect(screen.getByText("1 month")).toBeInTheDocument();
+    expect(screen.getByText("1 year")).toBeInTheDocument();
   });
 
-  it("reports the chosen interval", async () => {
+  it("marks the selected interval's bracket as pressed", () => {
+    renderWith(
+      <ChangesetTimeline
+        changesets={[monthlyChangeset, yearlyChangeset]}
+        selectedId={monthlyChangeset.id}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("1 month").closest("button")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("1 year").closest("button")).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("reports the chosen interval when its bracket is clicked", async () => {
     const onChange = vi.fn();
     renderWith(
-      <ChangesetPicker
+      <ChangesetTimeline
         changesets={[monthlyChangeset, yearlyChangeset]}
         selectedId={monthlyChangeset.id}
         onChange={onChange}
       />,
     );
-    await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByText("1 year"));
+    await userEvent.click(screen.getByText("1 year").closest("button")!);
     expect(onChange).toHaveBeenCalledWith(yearlyChangeset.id);
+  });
+
+  it("labels the start and end date of each interval on the axis", () => {
+    renderWith(
+      <ChangesetTimeline
+        changesets={[monthlyChangeset, yearlyChangeset]}
+        selectedId={monthlyChangeset.id}
+        onChange={vi.fn()}
+      />,
+    );
+    // yearlyChangeset: 2025-07-01 -> 2026-07-01; monthlyChangeset starts 2026-06-01.
+    expect(screen.getByText("2025-07")).toBeInTheDocument();
+    expect(screen.getByText("2026-06")).toBeInTheDocument();
+    expect(screen.getByText("2026-07")).toBeInTheDocument();
   });
 });
 

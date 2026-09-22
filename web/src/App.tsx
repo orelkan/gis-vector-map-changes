@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AppBar, Box, CssBaseline, Divider, Drawer, IconButton, Link, Stack,
+  AppBar, Box, CssBaseline, Divider, Drawer, IconButton, Link, Paper, Stack,
   ThemeProvider, Toolbar, Tooltip, Typography,
 } from "@mui/material";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
@@ -10,10 +10,11 @@ import {
   CLASSIFICATIONS, type ChangeDetail, type Changeset, type Classification,
   type FeatureHistory,
 } from "./api/types";
-import { buildTheme } from "./theme";
+import { buildTheme, CLASSIFICATION_COLORS, type BasemapChoice } from "./theme";
 import { useColorMode } from "./hooks/useColorMode";
 import { MapView } from "./components/MapView";
-import { ChangesetPicker } from "./components/ChangesetPicker";
+import { BasemapToggle } from "./components/BasemapToggle";
+import { ChangesetTimeline } from "./components/ChangesetTimeline";
 import { ClassificationFilter } from "./components/ClassificationFilter";
 import { FeatureDetailPanel } from "./components/FeatureDetailPanel";
 
@@ -23,6 +24,7 @@ export default function App() {
   const { mode, toggle } = useColorMode();
   const theme = useMemo(() => buildTheme(mode), [mode]);
 
+  const [basemap, setBasemap] = useState<BasemapChoice>("map");
   const [changesets, setChangesets] = useState<Changeset[]>([]);
   const [selectedChangesetId, setSelectedChangesetId] = useState<number | null>(null);
   const [visible, setVisible] = useState<Classification[]>([...CLASSIFICATIONS]);
@@ -83,7 +85,14 @@ export default function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box sx={{ display: "flex", height: "100vh" }}>
-        <AppBar position="fixed" sx={{ zIndex: (t) => t.zIndex.drawer + 1 }}>
+        <AppBar
+          position="fixed"
+          sx={{
+            zIndex: (t) => t.zIndex.drawer + 1,
+            backgroundImage: (t) =>
+              `linear-gradient(90deg, ${t.palette.primary.dark}, ${t.palette.primary.main})`,
+          }}
+        >
           <Toolbar variant="dense">
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               GIS Vector Map Changes — Tel Aviv-Yafo
@@ -107,23 +116,36 @@ export default function App() {
           <Toolbar variant="dense" />
           <Box sx={{ overflow: "auto", p: 2 }}>
             <Stack spacing={2}>
-              <ChangesetPicker
-                changesets={changesets}
-                selectedId={selectedChangesetId}
-                onChange={setSelectedChangesetId}
-              />
-              <ClassificationFilter
-                changeset={selectedChangeset}
-                visible={visible}
-                onToggle={toggleClassification}
-              />
-              <Divider />
-              <FeatureDetailPanel
-                change={change}
-                history={history}
-                loading={loadingDetail}
-                error={error}
-              />
+              <Paper variant="outlined" sx={{ p: 1.5, borderTopWidth: 3, borderTopColor: "primary.main" }}>
+                <ChangesetTimeline
+                  changesets={changesets}
+                  selectedId={selectedChangesetId}
+                  onChange={setSelectedChangesetId}
+                />
+              </Paper>
+              <Paper variant="outlined" sx={{ p: 1.5 }}>
+                <ClassificationFilter
+                  changeset={selectedChangeset}
+                  visible={visible}
+                  onToggle={toggleClassification}
+                />
+              </Paper>
+              <Paper
+                variant="outlined"
+                sx={{
+                  p: 1.5,
+                  borderLeftWidth: change ? 4 : 1,
+                  borderLeftColor: change ? CLASSIFICATION_COLORS[change.classification] : "divider",
+                  transition: "border-color 150ms",
+                }}
+              >
+                <FeatureDetailPanel
+                  change={change}
+                  history={history}
+                  loading={loadingDetail}
+                  error={error}
+                />
+              </Paper>
             </Stack>
           </Box>
           <Box sx={{ mt: "auto", p: 1.5 }}>
@@ -136,6 +158,10 @@ export default function App() {
               , ODbL. Basemap ©{" "}
               <Link href="https://openfreemap.org/" target="_blank" rel="noreferrer">
                 OpenFreeMap
+              </Link>{" "}
+              or{" "}
+              <Link href="https://www.esri.com/" target="_blank" rel="noreferrer">
+                Esri
               </Link>
               .
             </Typography>
@@ -147,12 +173,14 @@ export default function App() {
           <Box sx={{ position: "absolute", top: 48, bottom: 0, left: 0, right: 0 }}>
             <MapView
               mode={mode}
+              basemap={basemap}
               changesetId={selectedChangesetId}
               contextSnapshotId={selectedChangeset?.snapshot_b_id ?? null}
               visibleClassifications={visible}
               selectedChange={change}
               onSelectChange={handleSelectChange}
             />
+            <BasemapToggle value={basemap} onChange={setBasemap} />
           </Box>
         </Box>
       </Box>

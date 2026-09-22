@@ -200,6 +200,23 @@ every zoom).
   means running `build_changesets` for that pair first.
 - Tile classification filters are a validated allow-list, never
   string-interpolated into SQL.
+- **The interval picker is a timeline in presentation only** (`ChangesetTimeline`):
+  ticks mark the snapshot dates that exist, and each computed changeset draws
+  as a clickable bracket between its two dates, grouped into rows by
+  `span_label` (longest span on top) so nested intervals -- the 5-year span
+  containing five 1-year steps, which contain the trailing 1-month step --
+  read as zoom levels. There is deliberately no drag-an-endpoint affordance:
+  that would imply arbitrary on-demand interval computation, which is out of
+  scope (§8) for the same provenance reason the picker itself is.
+- **Optional satellite basemap**: Esri World Imagery (raster, no API key or
+  billing account), toggled independently of the light/dark UI theme via a
+  floating control on the map, since satellite imagery has no meaningful
+  "dark mode" of its own. Chosen over Mapbox/Maxar/Bing satellite layers,
+  which all require a key -- the same "no key/billing" bar the OpenFreeMap
+  vector basemap was already held to. Its attribution is picked up
+  automatically by MapLibre's own `AttributionControl` once it's the active
+  source, since the raster source declares an `attribution` string; no
+  separate attribution wiring was needed.
 
 ---
 

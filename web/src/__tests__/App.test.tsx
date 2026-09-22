@@ -81,12 +81,18 @@ describe("App", () => {
     (mapProps.at(-1)?.onSelectChange as (id: number) => void)(retracedChange.id);
     await waitFor(() => expect(screen.getByText("Geometry changed")).toBeInTheDocument());
 
-    await userEvent.click(screen.getByRole("combobox"));
-    await userEvent.click(screen.getByText("1 year"));
+    await userEvent.click(screen.getByText("1 year").closest("button")!);
 
     await waitFor(() =>
       expect(screen.getByText(/Click a highlighted building/)).toBeInTheDocument(),
     );
+  });
+
+  it("defaults to the street basemap and can switch to satellite", async () => {
+    render(<App />);
+    await waitFor(() => expect(mapProps.at(-1)?.basemap).toBe("map"));
+    await userEvent.click(screen.getByLabelText("Satellite imagery view"));
+    await waitFor(() => expect(mapProps.at(-1)?.basemap).toBe("satellite"));
   });
 
   it("always shows OpenStreetMap attribution", async () => {
