@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
-  monthlyChangeset, retracedChange, featureHistory, yearlyChangeset,
+  fiveYearChangeset, monthlyChangeset, retracedChange, featureHistory, yearlyChangeset,
 } from "../components/__tests__/fixtures";
 
 // MapLibre needs WebGL, which jsdom does not provide. The map itself is
@@ -39,10 +39,27 @@ beforeEach(() => {
 });
 
 describe("App", () => {
-  it("loads changesets and selects the first interval", async () => {
+  it("loads changesets and falls back to the first one when there is no 5-year interval", async () => {
     render(<App />);
     await waitFor(() => expect(screen.getByTestId("map")).toBeInTheDocument());
     await waitFor(() => expect(mapProps.at(-1)?.changesetId).toBe(monthlyChangeset.id));
+  });
+
+  it("defaults to the 5-year interval when one exists -- most data on first paint", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const json = (body: unknown) =>
+          new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+        if (url.endsWith("/api/changesets")) {
+          return json([monthlyChangeset, yearlyChangeset, fiveYearChangeset]);
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+    render(<App />);
+    await waitFor(() => expect(mapProps.at(-1)?.changesetId).toBe(fiveYearChangeset.id));
   });
 
   it("passes the after-snapshot as the map's context layer", async () => {
@@ -103,6 +120,19 @@ describe("App", () => {
     render(<App />);
     expect(screen.getByText(/OpenStreetMap contributors/)).toBeInTheDocument();
     expect(screen.getByText(/ODbL/)).toBeInTheDocument();
+  });
+
+  it("shows the About dialog with attribution and a link to the project", async () => {
+    render(<App />);
+    expect(screen.queryByText(/by Orel Kanditan/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "About" }));
+
+    expect(screen.getByText(/by Orel Kanditan/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /GitHub/ })).toHaveAttribute(
+      "href",
+      "https://github.com/orelkan/gis-vector-map-changes",
+    );
   });
 
   it("toggles colour mode and hands it to the map", async () => {

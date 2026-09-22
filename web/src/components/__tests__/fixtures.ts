@@ -35,6 +35,21 @@ export const monthlyChangeset: Changeset = {
   ambiguous_count: 0,
 };
 
+export const fiveYearChangeset: Changeset = {
+  ...yearlyChangeset,
+  id: 46,
+  time_a: "2021-07-01T00:00:00+00:00",
+  span_label: "5 years",
+  changed_count: 5430,
+  unchanged_count: 21825,
+  modified_geometry_count: 1500,
+  modified_attributes_count: 2200,
+  modified_geometry_and_attributes_count: 200,
+  added_count: 1000,
+  removed_count: 500,
+  ambiguous_count: 30,
+};
+
 const square = (x: number, y: number): [number, number][] => [
   [x, y], [x + 0.001, y], [x + 0.001, y + 0.001], [x, y + 0.001], [x, y],
 ];

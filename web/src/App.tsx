@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  AppBar, Box, CssBaseline, Divider, Drawer, IconButton, Link, Paper, Stack,
-  ThemeProvider, Toolbar, Tooltip, Typography,
+  AppBar, Box, Button, CssBaseline, Dialog, DialogContent, DialogTitle,
+  Divider, Drawer, IconButton, Link, Paper, Stack, ThemeProvider, Toolbar,
+  Tooltip, Typography,
 } from "@mui/material";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import GitHubIcon from "@mui/icons-material/GitHub";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import { api } from "./api/client";
 import {
@@ -24,6 +27,7 @@ export default function App() {
   const { mode, toggle } = useColorMode();
   const theme = useMemo(() => buildTheme(mode), [mode]);
 
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [basemap, setBasemap] = useState<BasemapChoice>("map");
   const [changesets, setChangesets] = useState<Changeset[]>([]);
   const [selectedChangesetId, setSelectedChangesetId] = useState<number | null>(null);
@@ -37,7 +41,11 @@ export default function App() {
     api.listChangesets()
       .then((list) => {
         setChangesets(list);
-        if (list.length) setSelectedChangesetId(list[0].id);
+        // Default to the longest computed span -- most data on screen at
+        // first paint. Falls back to whatever the API returns first if a
+        // "5 years" interval doesn't exist (e.g. a smaller/test dataset).
+        const longest = list.find((cs) => cs.span_label === "5 years") ?? list[0];
+        if (longest) setSelectedChangesetId(longest.id);
       })
       .catch((e: Error) => setError(e.message));
   }, []);
@@ -97,6 +105,14 @@ export default function App() {
             <Typography variant="h6" sx={{ flexGrow: 1 }}>
               GIS Vector Map Changes — Tel Aviv-Yafo
             </Typography>
+            <Button
+              color="inherit"
+              startIcon={<InfoOutlinedIcon />}
+              onClick={() => setAboutOpen(true)}
+              sx={{ mr: 1 }}
+            >
+              About
+            </Button>
             <Tooltip title={mode === "dark" ? "Switch to light mode" : "Switch to dark mode"}>
               <IconButton color="inherit" onClick={toggle} aria-label="toggle color mode">
                 {mode === "dark" ? <LightModeIcon /> : <DarkModeIcon />}
@@ -104,6 +120,33 @@ export default function App() {
             </Tooltip>
           </Toolbar>
         </AppBar>
+
+        <Dialog open={aboutOpen} onClose={() => setAboutOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle sx={{ fontWeight: 700 }}>GIS Vector Map Changes</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              An educational vector-GIS data platform for detecting and explaining
+              changes between dated map snapshots of Tel Aviv-Yafo. It compares
+              OpenStreetMap building footprints across time, classifies what
+              changed -- added, removed, moved, resurveyed, or edited -- and
+              renders the result as vector tiles served from PostGIS.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Built with Apache Airflow, PostGIS, FastAPI, React, and MapLibre GL.
+            </Typography>
+            <Typography variant="body2">
+              by Orel Kanditan ·{" "}
+              <Link
+                href="https://github.com/orelkan/gis-vector-map-changes"
+                target="_blank"
+                rel="noreferrer"
+                sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+              >
+                <GitHubIcon fontSize="inherit" /> GitHub
+              </Link>
+            </Typography>
+          </DialogContent>
+        </Dialog>
 
         <Drawer
           variant="permanent"
