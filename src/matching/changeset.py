@@ -1,6 +1,6 @@
 """Orchestrates the full matching pipeline: Stage 1 ID matching, Stage 2
 spatial candidates for the remainder, Stage 3 scoring, Stage 4 resolution,
-Stage 5 classification. See docs/matching-behavior.md section 4 for the
+Stage 5 classification. See docs/matching-spec.md section 4 for the
 full specification this implements.
 
 Deliberately Airflow-independent and I/O-free: callers load features via

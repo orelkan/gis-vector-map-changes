@@ -1,7 +1,7 @@
 import type { ChangeDetail, Changeset, FeatureHistory, HistoryEntry } from "../../api/types";
 
 /** Mirrors the real yearly changeset (2025-07-01 -> 2026-07-01) whose counts
- *  are pinned in docs/matching-behavior.md section 7. */
+ *  are pinned in docs/matching-spec.md section 7. */
 export const yearlyChangeset: Changeset = {
   id: 20,
   algorithm_version: "v1",
@@ -39,7 +39,7 @@ const square = (x: number, y: number): [number, number][] => [
   [x, y], [x + 0.001, y], [x + 0.001, y + 0.001], [x, y + 0.001], [x, y],
 ];
 
-/** The re-traced building from docs/matching-behavior.md: low IoU but high
+/** The re-traced building from docs/matching-spec.md: low IoU but high
  *  centroid-aligned IoU, i.e. moved rather than reshaped. */
 export const retracedChange: ChangeDetail = {
   id: 501,

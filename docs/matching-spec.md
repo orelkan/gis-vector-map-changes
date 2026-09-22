@@ -1,7 +1,10 @@
-# Matching & classification: defined behavior
+# Matching & classification: approved behavior
 
-Status: **implemented and verified against the real ingested snapshots
-(2026-09-16).** See §7 for the acceptance results.
+Approved feature-matching behavior, classification rules, and edge cases for
+GIS Vector Map Changes. Implementation status and verification results live
+in `docs/progress.md`, not here — this file specifies what the pipeline
+*should* do; §1's empirical baseline is kept because every threshold in §5
+depends on it, but "did the real run match this" belongs in progress.md.
 
 CLAUDE.md requires that expected behavior be defined *before* matching is
 built:
@@ -196,62 +199,20 @@ shrinking building. Comparing different `aoi_version`s is a hard error.
 
 ## 7. Expected outputs (acceptance test for the implementation)
 
-**Status: implemented and run against the real snapshots (2026-09-16).**
-Every number below is what the real `build_changesets` DAG actually
-produced, cross-checked against the predictions made while writing this
-spec -- both changesets' counts satisfy the consistency equations exactly,
-and every spot-checked `osm_id` (the re-traced block, both ambiguous pairs)
-matches its predicted IoU to four decimal places. See
-[README.md](../README.md) for the run details.
-
-**Monthly (2026-06-01 → 2026-07-01)** — exact, matches the pre-implementation
-prediction with zero discrepancy:
-
-| class | count |
-|---|---|
-| `unchanged` | 26,944 |
-| `modified_geometry` | 30 |
-| `modified_attributes` | 4 |
-| `modified_geometry_and_attributes` | 0 |
-| `added` | 4 |
-| `removed` | 18 |
-| `ambiguous` | 0 |
-
-Consistency: 26,944+30+4+0 = 26,978 ID-matched; +18 removed = 26,996 (A);
-+4 added = 26,982 (B).
-
-**Yearly (2025-07-01 → 2026-07-01)** — exact:
-
-| class | count |
-|---|---|
-| `unchanged` | 26,628 |
-| `modified_geometry` | 145 |
-| `modified_attributes` | 130 |
-| `modified_geometry_and_attributes` | 5 |
-| `added` | 72 |
-| `removed` | 103 |
-| `ambiguous` | 2 |
-
-Consistency: 26,628+145+130+5 = 26,908 ID-matched (matches §1's measured
-26,908 exactly); +103 removed +2 ambiguous (both 1:1 `partial_overlap`
-pairs, one A-id each) = 27,013 (A); +72 added +2 ambiguous = 26,982 (B). The
-pre-implementation estimate in an earlier draft of this section
-("`modified_attributes` ≈129") undercounted by one tag-changed feature that
-also had its geometry change -- 130 + 5 = 135 total attrs-changed, which
-does match §1's raw baseline measurement exactly. The unchanged/
-modified_geometry split (≈26,629/≈145 estimated) landed at 26,628/145,
-within the margin the estimate flagged as undetermined.
-
-Both ambiguous records are exactly the two pairs identified in §1's
-real-data analysis: `way/488475407` ~ `relation/19933969` (iou=0.0636) and
-`way/506832165` ~ `way/1427652677` (iou=0.2230). `way/149268397` (the
-re-traced block) is `modified_geometry` with iou=0.1193,
-iou_centroid_aligned=0.6904, centroid_shift_m=9.72, area_ratio=0.69 --
-matching the prediction in §1 exactly.
+This is the acceptance criterion an implementation must satisfy: for the
+monthly (2026-06-01→2026-07-01) and yearly (2025-07-01→2026-07-01) pairs, the
+per-classification counts must satisfy the consistency equations implied by
+§1's baseline (ID-matched + removed = A's feature count; ID-matched + added =
+B's feature count), and the two known real ambiguous pairs
+(`way/488475407`~`relation/19933969`, `way/506832165`~`way/1427652677`) and
+the re-traced block (`way/149268397`) must resolve to the classifications and
+metric values described in §1 and §6. Actual measured results from running
+this against the real snapshots are recorded in `docs/progress.md`, not
+duplicated here.
 
 Per CLAUDE.md ("avoid tests that assert only row counts"), the test suite
-also asserts specific `osm_id`s and their classifications, not just these
-totals -- see tests/matching/.
+also asserts specific `osm_id`s and their classifications, not just totals
+-- see tests/matching/.
 
 ---
 
@@ -259,10 +220,8 @@ totals -- see tests/matching/.
 
 - **Systematic block-shift detection** (recognising a whole neighbourhood
   moved together as one survey realignment) — needs spatial clustering of
-  shift vectors; its own milestone if wanted.
-- **Loading features into queryable PostGIS tables** — only needed when
-  matching actually runs; that schema belongs with the implementation.
-- Road networks, vector tiles, web map, canonical cross-source identities.
+  shift vectors; its own milestone if wanted. See `docs/architecture.md` §8.
+- Road networks, canonical cross-source identities.
 
 ---
 

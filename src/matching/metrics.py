@@ -1,6 +1,6 @@
 """Similarity metrics between two loaded features, computed in METRIC_CRS.
 
-Every metric's interpretation is documented in docs/matching-behavior.md
+Every metric's interpretation is documented in docs/matching-spec.md
 section 3, including why iou_centroid_aligned is recorded but deliberately
 NOT used as a classification gate (validated against real re-traced
 buildings: it separates "positional" from "shape" disagreement, but does

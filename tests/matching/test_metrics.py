@@ -58,7 +58,7 @@ def test_pure_translation_is_recovered_by_centroid_alignment():
     # Same shape, moved far away: position-sensitive IoU collapses, but
     # aligning centroids first must recover IoU=1 -- this is exactly the
     # real-world case (a re-traced building block) that justified adding
-    # iou_centroid_aligned. See docs/matching-behavior.md section 3.
+    # iou_centroid_aligned. See docs/matching-spec.md section 3.
     a = _square(0, 0, 10)
     b = _square(500, 500, 10)  # identical shape, far away -> disjoint
 

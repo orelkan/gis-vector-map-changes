@@ -5,7 +5,7 @@ persisted durably (MinIO change-layer GeoJSON + Postgres metadata).
 Orchestration only, per CLAUDE.md's architecture rules -- the matching
 algorithm lives in src/matching and is independently testable without
 Airflow (see tests/matching/). This DAG just wires: fetch two snapshots ->
-match -> render -> persist -> record. See docs/matching-behavior.md for the
+match -> render -> persist -> record. See docs/matching-spec.md for the
 full specification this implements.
 
 Manually triggered (schedule=None), for the same reason as
@@ -14,7 +14,7 @@ snapshot pairs for the monthly/yearly MVP comparison, not a recurring
 "latest vs previous" job. Revisit for a future continuous-monitoring
 milestone.
 
-Default comparison pairs match the two changesets docs/matching-behavior.md
+Default comparison pairs match the two changesets docs/matching-spec.md
 analyzes and pins expected output counts for: monthly
 (2026-06-01 -> 2026-07-01) and yearly (2025-07-01 -> 2026-07-01), both
 against the v2 snapshots (see ingest_osm_building_snapshots's v1->v2 note).

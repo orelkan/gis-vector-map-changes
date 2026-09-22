@@ -64,7 +64,7 @@ def test_repair_keeps_only_polygonal_parts():
     # recovers the square but also emits the spike as a dangling LineString,
     # yielding a GeometryCollection. Reproduces the real shape of
     # relation/14011822 & relation/14011825 in the ingested Tel Aviv-Yafo
-    # snapshots -- see docs/matching-behavior.md.
+    # snapshots -- see docs/matching-spec.md.
     spiked = Polygon([(0, 0), (10, 0), (10, 10), (15, 10), (10, 10), (0, 10), (0, 0)])
     assert spiked.is_valid is False
 

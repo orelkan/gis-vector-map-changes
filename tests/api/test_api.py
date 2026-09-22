@@ -41,7 +41,7 @@ def client():
 @pytest.fixture(scope="module")
 def yearly_changeset(client):
     """The 2025-07-01 -> 2026-07-01 changeset, whose exact expected counts
-    are pinned in docs/matching-behavior.md section 7."""
+    are pinned in docs/matching-spec.md section 7."""
     for cs in client.get("/api/changesets").json():
         if cs["time_a"].startswith("2025-07-01") and cs["time_b"].startswith("2026-07-01"):
             return cs
@@ -76,7 +76,7 @@ def test_changesets_expose_span_labels(client):
 
 
 def test_changeset_counts_match_matching_spec(yearly_changeset):
-    """Parity with docs/matching-behavior.md section 7's verified table."""
+    """Parity with docs/matching-spec.md section 7's verified table."""
     cs = yearly_changeset
     assert cs["unchanged_count"] == 26628
     assert cs["modified_geometry_count"] == 145
@@ -183,7 +183,7 @@ def test_empty_tile_is_not_an_error(client, yearly_changeset):
 
 
 def test_change_detail_includes_before_and_after_geometry(client, yearly_changeset):
-    """way/149268397 is the re-traced building from docs/matching-behavior.md;
+    """way/149268397 is the re-traced building from docs/matching-spec.md;
     its metrics and both geometries must survive the round trip."""
     r = client.get(f"/tiles/changes/{yearly_changeset['id']}/{TILE_Z}/{TILE_X}/{TILE_Y}.mvt")
     ids = [f["properties"]["change_feature_id"] for f in _decode(r.content)["changes"]["features"]]

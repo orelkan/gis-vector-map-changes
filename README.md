@@ -18,20 +18,21 @@ plus 2026-06-01 and 2026-07-01.
 as `added`/`removed`/`modified_geometry`/`modified_attributes`/
 `modified_geometry_and_attributes`/`unchanged`/`ambiguous`. Behavior was
 specified *before* implementation, per CLAUDE.md's requirement -- see
-[docs/matching-behavior.md](docs/matching-behavior.md), which derives every
+[docs/matching-spec.md](docs/matching-spec.md), which derives every
 threshold from measurement of the real ingested snapshots and records the
-expected output as an acceptance test. **Implemented and verified**: a real
-run against the ingested snapshots reproduced every predicted count exactly
-(see docs/matching-behavior.md section 7) and spot-checked individual
-`osm_id`s matched their predicted metrics to four decimal places.
+expected output as an acceptance test.
 
 **3. Web UI** (`web/`, `api/`, `dags/publish_to_postgis.py`): a React +
 TypeScript viewer whose MapLibre map is driven by vector tiles generated in
 PostGIS (`ST_AsMVT`). Click a building to see what changed and how, filter
 by change type, switch between computed intervals (1 month / 1 year /
-5 years), and view any building's full history across all snapshots. See
-[docs/web-ui.md](docs/web-ui.md) -- in particular why per-interval change
-storage does **not** grow quadratically.
+5 years), and view any building's full history across all snapshots.
+
+See [docs/architecture.md](docs/architecture.md) for accepted architecture
+and the rationale behind key decisions (including why per-interval change
+storage does **not** grow quadratically), and
+[docs/progress.md](docs/progress.md) for current status and verification
+results actually run against the live stack.
 
 ## Data source and licensing
 
@@ -95,91 +96,11 @@ make test-integration    # hits the real ohsome API over the network
 make test-web            # frontend (vitest + React Testing Library)
 ```
 
-## Verified end-to-end (2026-08-20)
+## Status and verification
 
-The full stack has been run for real (Docker, not just designed against
-docs) and the four things flagged as unverified in earlier drafts of this
-README are now resolved:
-
-1. **`docker compose up` works** -- with one fix beyond what's described
-   above: the stock `apache/airflow:3.3.1` image doesn't include this
-   project's business-logic dependencies (geopandas/shapely/pyproj/
-   requests/psycopg), so `x-airflow-common` now builds a local `Dockerfile`
-   that extends the official image with them, rather than using the bare
-   image directly. `_PIP_ADDITIONAL_REQUIREMENTS` was deliberately not used
-   for this -- Airflow's own docs describe it as "ONLY for quick checks."
-2. **ohsome's `POST /elements/geometry` is genuinely blocked (HTTP 403),
-   confirmed from two independent real networks**, not a sandbox-specific
-   fluke -- same for `/elements/centroid`. `/elements/bbox`,
-   `/elements/count`, and `/elementsFullHistory/geometry` all work fine.
-   No public explanation was found. The fix: `src/ingestion/ohsome_client.py`
-   now queries `POST /elementsFullHistory/geometry` with a minimal
-   (1-second) time *range* starting at the target instant; ohsome clips
-   each returned version's `@validFrom`/`@validTo` to the query bounds, so
-   filtering the response to `@validFrom == <requested instant>` (done in
-   `src/ingestion/snapshot.py`) reconstructs the same point-in-time result
-   the blocked endpoint would have given. Cross-checked live against
-   `/elements/count` for the same instant/bbox -- feature counts matched
-   exactly.
-3. **ohsome's tag shape, confirmed**: `properties=tags` flattens OSM tags
-   directly into each feature's `properties` object, alongside `@`-prefixed
-   metadata (`@osmId`, `@validFrom`, `@validTo`) -- exactly what
-   `normalize_feature()` assumed.
-4. **AOI boundary clipping, confirmed**: ohsome's `bpolys` *clips*
-   geometries to the AOI polygon, not just filters by intersection --
-   verified by downloading a real snapshot and checking every feature that
-   isn't fully `.contains()`-ed by the AOI polygon: the area outside the
-   AOI is on the order of 1e-11 to 1e-14 square degrees (floating-point
-   boundary noise, not real overhang) for all such features.
-
-A real end-to-end run against Tel Aviv-Yafo produced (feature counts /
-invalid-then-repaired geometries out of that count):
-
-| requested_time | feature_count | invalid_geometry_count |
-|---|---|---|
-| 2025-07-01 | 27013 | 3 |
-| 2026-06-01 | 26996 | 4 |
-| 2026-07-01 | 26982 | 4 |
-
-Idempotency was also verified for real: re-triggering the DAG with the same
-`requested_times` left the `snapshots` table at 3 rows (no duplicates).
-
-### `source_query_version` v2 (2026-09-16)
-
-Analysis while specifying the matching milestone found that `make_valid`
-could return a **GeometryCollection** (recovered polygon + zero-area
-LineString "spikes") for 3 of 26,982 features, breaking the
-"snapshots contain Polygon/MultiPolygon" invariant that matching and a
-PostGIS polygonal column depend on. `src/ingestion/validate.py` now keeps
-only polygonal parts after repair (`repair_method=
-"make_valid+extract_polygons"`), and the default `source_query_version` is
-`v2`. Re-running ingestion produced identical feature counts and a **0.000000
-m² total area delta** across all features -- it is purely a type
-normalization. The v1 rows are retained, per CLAUDE.md's rule that a changed
-extraction definition creates a new version rather than rewriting history.
-
-Snapshot dates default to `2025-07-01` / `2026-06-01` / `2026-07-01`, not
-the `2025-08-01` / `2026-07-01` / `2026-08-01` originally discussed --
-shifted back one month after `GET /v1/metadata` showed ohsome's data extent
-only reaches `2026-07-27T09:00Z`, keeping the same 1-month/1-year spacing.
-
-## Matching verified end-to-end (2026-09-16)
-
-`build_changesets` was run for real against the `v2` snapshots (Docker, not
-just designed against the spec). Both comparison pairs reproduced
-[docs/matching-behavior.md](docs/matching-behavior.md) section 7's
-predictions exactly:
-
-| pair | unchanged | modified_geometry | modified_attributes | modified_geometry_and_attributes | added | removed | ambiguous |
-|---|---|---|---|---|---|---|---|
-| monthly (2026-06-01 → 2026-07-01) | 26,944 | 30 | 4 | 0 | 4 | 18 | 0 |
-| yearly (2025-07-01 → 2026-07-01) | 26,628 | 145 | 130 | 5 | 72 | 103 | 2 |
-
-Spot-checked individually, not just by count: both `ambiguous` records are
-exactly the two cross-id overlaps found during spec analysis
-(`way/488475407`~`relation/19933969` at iou=0.0636,
-`way/506832165`~`way/1427652677` at iou=0.2230), and the re-traced block's
-`way/149268397` came back `modified_geometry` with iou=0.1193,
-iou_centroid_aligned=0.6904, centroid_shift_m=9.72 -- matching the spec's
-predictions to four decimal places. Idempotency verified for real too:
-re-triggering left the `changesets` table at 2 rows.
+All three milestones above are implemented and have been run for real
+against the live Docker stack, not just designed against docs. Detailed
+verification results (real run counts, cross-checks, idempotency checks,
+and the one thing that isn't verifiable headlessly) are tracked in
+[docs/progress.md](docs/progress.md), which is kept current as the project
+evolves rather than duplicated here.

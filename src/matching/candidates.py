@@ -1,7 +1,7 @@
 """Spatial candidate generation for features whose osm_id does not persist
 across snapshots (the remainder after Stage 1 ID matching).
 
-Boundary semantics (explicit, per CLAUDE.md, see docs/matching-behavior.md
+Boundary semantics (explicit, per CLAUDE.md, see docs/matching-spec.md
 section 4): candidacy requires positive *overlapping area*, not the
 `intersects` predicate. Tel Aviv terraced housing shares walls, so
 `intersects` would generate many spurious candidates from mere edge

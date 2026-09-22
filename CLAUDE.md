@@ -269,3 +269,34 @@ Unless explicitly requested, do not add:
 
 When suggesting one of these, explain which existing limitation it solves and
 what additional operational burden it introduces.
+
+## Maintaining project context
+
+Maintain repository documentation as part of completing meaningful work.
+
+- CLAUDE.md: stable project rules, essential commands, architectural constraints,
+  and recurring pitfalls. Update only when these change or we discover a lasting
+  lesson. Keep it concise.
+- docs/architecture.md: accepted architecture and significant decisions, including
+  their rationale.
+- docs/matching-spec.md: approved feature-matching behavior, classification rules,
+  and edge cases.
+- docs/progress.md: current milestone, implemented work, verification results,
+  unresolved issues, and concrete next steps.
+
+Before making changes:
+1. Read docs/progress.md if it exists.
+2. Read only the additional documentation relevant to the task.
+3. Inspect the relevant implementation; documentation may be outdated.
+4. Flag material disagreements between code and documentation.
+
+After meaningful changes:
+1. Update affected documentation to match the actual implementation.
+2. Distinguish accepted decisions, proposals, and unfinished work.
+3. Record verification actually performed; never imply unrun tests passed.
+4. Replace obsolete information instead of accumulating a session transcript.
+5. Briefly summarize documentation changes in your completion message.
+
+Do not duplicate information across files or automatically load every document.
+Do not turn temporary workarounds into permanent rules.
+Do not change project requirements or approval boundaries without discussing it.

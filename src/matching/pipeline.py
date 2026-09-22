@@ -62,7 +62,7 @@ class ChangesetResult:
 
 
 def validate_comparable(snapshot_a: SnapshotRef, snapshot_b: SnapshotRef) -> None:
-    """Docs/matching-behavior.md section 2: both snapshots must share
+    """Docs/matching-spec.md section 2: both snapshots must share
     source, layer, aoi_id, aoi_version, and source_query_version. This is
     what makes AOI-boundary clipping safe to compare (section 6g) -- a hard
     error, not a warning, since comparing across a changed AOI or

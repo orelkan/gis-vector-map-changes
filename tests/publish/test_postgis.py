@@ -317,7 +317,7 @@ def test_publish_change_features_requires_published_snapshots(db_connection):
 
 def test_unchanged_is_derivable_from_absence(db_connection, published_snapshots):
     """A building in both snapshots with no change_features row is unchanged
-    -- the derivation the UI and API rely on (see docs/web-ui.md)."""
+    -- the derivation the UI and API rely on (see docs/architecture.md)."""
     a_id, b_id = published_snapshots
     cs = _changeset(db_connection, a_id, b_id)
     postgis.publish_change_features(
