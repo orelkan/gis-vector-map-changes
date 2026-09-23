@@ -328,3 +328,31 @@ def test_output_ordering_is_deterministic():
     assert [(r.osm_ids_a, r.osm_ids_b) for r in first] == [(r.osm_ids_a, r.osm_ids_b) for r in second]
     keys = [(r.osm_ids_a, r.osm_ids_b) for r in first]
     assert keys == sorted(keys)
+
+
+def test_pair_metrics_ordering_is_deterministic_not_hash_dependent():
+    # `pair_metrics` insertion order becomes the `candidates` array order of
+    # the exported GeoJSON (see src/matching/render.py). It used to come from
+    # frozenset iteration, and Python randomizes string hashing per process,
+    # so the same inputs produced different artifacts run to run. Pin the
+    # order explicitly -- CLAUDE.md: "Make deterministic output ordering part
+    # of exported artifacts and tests."
+    a = {
+        "way/old2": _feat("way/old2", _square(1, 0, 3)),
+        "way/old1": _feat("way/old1", _square(0, 0, 3)),
+    }
+    b = {
+        "way/new2": _feat("way/new2", _square(1, 1, 3)),
+        "way/new1": _feat("way/new1", _square(0, 1, 3)),
+    }
+
+    r = _one(build_changeset(a, b), classification_reason="complex_cluster")
+
+    # Sorted by (osm_id_a, osm_id_b), regardless of the order the inputs
+    # were supplied in or of this process's hash seed.
+    assert list(r.pair_metrics) == [
+        ("way/old1", "way/new1"),
+        ("way/old1", "way/new2"),
+        ("way/old2", "way/new1"),
+        ("way/old2", "way/new2"),
+    ]

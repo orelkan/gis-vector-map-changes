@@ -10,7 +10,7 @@ src.matching.features and pass the resulting dicts in directly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, get_args
 
 from shapely.geometry.base import BaseGeometry
 
@@ -28,6 +28,10 @@ Classification = Literal[
     "removed",
     "ambiguous",
 ]
+
+# The same names as a runtime tuple, for iteration (counts, validation).
+# Derived from the Literal rather than restated, so the two cannot drift.
+CLASSIFICATIONS: tuple[Classification, ...] = get_args(Classification)
 
 
 @dataclass(frozen=True)
@@ -143,38 +147,44 @@ def _connected_components(
     cluster" -- CLAUDE.md names split/merge explicitly but a general
     bipartite graph can produce larger tangles (e.g. two old buildings each
     overlapping two new ones), and those are no less ambiguous.
+
+    An osm_id belongs to exactly one side: `candidates` is built from the
+    features left over after ID matching, so the A and B key spaces are
+    disjoint by construction and a node's side is just "was it a key".
     """
-    parent: dict[str, str] = {}
-
-    def find(x: str) -> str:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(x: str, y: str) -> None:
-        rx, ry = find(x), find(y)
-        if rx != ry:
-            parent[rx] = ry
-
-    a_side: set[str] = set()
-    b_side: set[str] = set()
+    neighbours: dict[str, set[str]] = {}
     for a_id, b_ids in candidates.items():
-        a_side.add(a_id)
-        parent.setdefault(a_id, a_id)
+        neighbours.setdefault(a_id, set()).update(b_ids)
         for b_id in b_ids:
-            b_side.add(b_id)
-            parent.setdefault(b_id, b_id)
-            union(a_id, b_id)
+            neighbours.setdefault(b_id, set()).add(a_id)
 
-    groups: dict[str, set[str]] = {}
-    for node in parent:
-        groups.setdefault(find(node), set()).add(node)
+    a_side = set(candidates)
+    seen: set[str] = set()
+    components: list[tuple[frozenset[str], frozenset[str]]] = []
 
-    return [
-        (frozenset(m for m in members if m in a_side), frozenset(m for m in members if m in b_side))
-        for members in groups.values()
-    ]
+    for start in neighbours:
+        if start in seen:
+            continue
+        # Breadth-first walk out from `start`; everything reachable is one
+        # component, since candidacy is symmetric.
+        seen.add(start)
+        members: set[str] = set()
+        queue = [start]
+        while queue:
+            node = queue.pop()
+            members.add(node)
+            for neighbour in neighbours[node]:
+                if neighbour not in seen:
+                    seen.add(neighbour)
+                    queue.append(neighbour)
+        components.append(
+            (
+                frozenset(m for m in members if m in a_side),
+                frozenset(m for m in members if m not in a_side),
+            )
+        )
+
+    return components
 
 
 def build_changeset(
@@ -215,20 +225,31 @@ def build_changeset(
     # Stage 2: spatial candidates for the remainder only.
     candidates = generate_candidates(only_in_a, only_in_b)
     groups = _connected_components(candidates)
+    # Sets, because the group loop below membership-tests these once per
+    # (a_id, b_id) pair in the component.
+    candidate_sets = {a_id: set(b_ids) for a_id, b_ids in candidates.items()}
 
     matched_a: set[str] = set()
     matched_b: set[str] = set()
 
     for a_ids, b_ids in groups:
+        # Iterate the sorted ids, not the frozensets themselves: Python
+        # randomizes string hashing per process, so frozenset iteration order
+        # varies between runs. That order becomes `pair_metrics` insertion
+        # order, and from there the `candidates` array of the exported
+        # GeoJSON -- which made the same inputs produce different artifacts
+        # run to run. CLAUDE.md requires deterministic output ordering, so
+        # the sort is part of the contract, not a tidy-up.
+        sorted_a, sorted_b = sorted(a_ids), sorted(b_ids)
         pair_metrics = {
             (a_id, b_id): compute_metrics(only_in_a[a_id], only_in_b[b_id])
-            for a_id in a_ids
-            for b_id in b_ids
-            if b_id in candidates.get(a_id, [])
+            for a_id in sorted_a
+            for b_id in sorted_b
+            if b_id in candidate_sets.get(a_id, ())
         }
         matched_a.update(a_ids)
         matched_b.update(b_ids)
-        feats = [only_in_a[a_id] for a_id in a_ids] + [only_in_b[b_id] for b_id in b_ids]
+        feats = [only_in_a[a_id] for a_id in sorted_a] + [only_in_b[b_id] for b_id in sorted_b]
 
         # Stage 4: resolve.
         if len(a_ids) == 1 and len(b_ids) == 1:
