@@ -9,9 +9,14 @@ matching/classification behavior — this file tracks state, not design.
 
 ## Current milestone
 
-**Milestone 3 (web UI) is complete and pushed.** All three milestones
-(ingestion, matching, web UI) are implemented, tested, and verified against
-the real stack, most recently on 2026-09-22. No milestone is in progress.
+**All three milestones (ingestion, matching, web UI) are complete and
+pushed.** Implemented, tested, and verified against the real stack. No
+milestone is in progress.
+
+Most recent work: a review-driven refactor pass on 2026-09-23 (see the
+section near the end of this file), which also fixed two defects — change
+layers that were not reproducible between runs, and an empty satellite
+basemap. The satellite fix was confirmed in a real browser by the user.
 
 ---
 
@@ -363,7 +368,23 @@ highlighted building opens the detail panel with the before/after outlines.
 
 ## Concrete next steps
 
-None committed to yet — no milestone is currently in progress. Candidates
-raised but deliberately deferred (see `docs/architecture.md` §8 for why):
-retrofit Airflow Assets across the ingest→match→publish chain; systematic
-block-shift detection; arbitrary on-demand interval computation.
+No milestone is committed to. Two small loose ends, then a free choice of
+candidates.
+
+**Loose ends from the 2026-09-23 refactor pass:**
+
+- The stored change layers in MinIO predate the ordering fix, so the
+  `candidates` arrays of 70 ambiguous records across the 7 changesets are in
+  the old hash order. Values are all identical, so nothing is wrong with the
+  served data and no re-run is required. Re-running `build_changesets` would
+  bring the artifacts in line with what the code now produces, if byte-level
+  agreement with a fresh run matters later.
+- `MapView`'s click-to-select path (clicking a highlighted building to open
+  the detail panel with before/after outlines) is the one behavior the
+  headless browser harness could not exercise, because headless Chrome never
+  requests the overlay vector tiles at all. Worth a deliberate click after
+  any future change to `web/src/components/map/`.
+
+**Candidates raised but deliberately deferred** (see `docs/architecture.md`
+§8 for why): retrofit Airflow Assets across the ingest→match→publish chain;
+systematic block-shift detection; arbitrary on-demand interval computation.
