@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, NamedTuple
 
+from src.db._upsert import upsert_returning
+
 
 class ChangesetRow(NamedTuple):
     id: int
@@ -37,11 +39,16 @@ _UPSERT_SQL = """
     RETURNING id, created_time
 """
 
-_SELECT_EXISTING_SQL = """
-    SELECT id, created_time FROM changesets
+# The natural key, written once -- see src/db/snapshots.py for the same
+# arrangement.
+_NATURAL_KEY_WHERE = """
     WHERE snapshot_a_id = %(snapshot_a_id)s AND snapshot_b_id = %(snapshot_b_id)s
       AND algorithm_version = %(algorithm_version)s
 """
+
+_SELECT_EXISTING_SQL = f"SELECT id, created_time FROM changesets {_NATURAL_KEY_WHERE}"
+
+_GET_SQL = f"SELECT id, change_layer_object_uri FROM changesets {_NATURAL_KEY_WHERE}"
 
 
 def upsert_changeset(connection: Any, params: dict) -> ChangesetRow:
@@ -53,24 +60,8 @@ def upsert_changeset(connection: Any, params: dict) -> ChangesetRow:
     snapshot_b_id, algorithm_version, change_layer_object_uri, and one
     *_count key per classification (see sql/002_create_changesets.sql).
     """
-    with connection.cursor() as cursor:
-        cursor.execute(_UPSERT_SQL, params)
-        row = cursor.fetchone()
-        if row is not None:
-            connection.commit()
-            return ChangesetRow(id=row[0], created_time=row[1], created=True)
-
-        cursor.execute(_SELECT_EXISTING_SQL, params)
-        existing = cursor.fetchone()
-        connection.commit()
-        return ChangesetRow(id=existing[0], created_time=existing[1], created=False)
-
-
-_GET_SQL = """
-    SELECT id, change_layer_object_uri FROM changesets
-    WHERE snapshot_a_id = %(snapshot_a_id)s AND snapshot_b_id = %(snapshot_b_id)s
-      AND algorithm_version = %(algorithm_version)s
-"""
+    row, created = upsert_returning(connection, _UPSERT_SQL, _SELECT_EXISTING_SQL, params)
+    return ChangesetRow(id=row[0], created_time=row[1], created=created)
 
 
 def get_changeset(connection: Any, params: dict) -> ChangesetLookup | None:

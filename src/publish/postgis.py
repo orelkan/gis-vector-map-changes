@@ -20,6 +20,7 @@ if the prerequisite is missing rather than silently writing NULL geometry.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from shapely.geometry import MultiPolygon, shape
@@ -53,6 +54,35 @@ def _geom_hex(geojson_geometry: dict[str, Any]) -> str:
     return _as_multipolygon(shape(geojson_geometry)).wkb_hex
 
 
+def _load_via_staging(
+    cursor: Any,
+    *,
+    delete_sql: str,
+    delete_params: tuple,
+    staging_ddl: str,
+    copy_sql: str,
+    rows: Iterable[tuple],
+    insert_sql: str,
+    insert_params: dict,
+) -> int:
+    """Atomic replace-by-staging, shared by both publish functions.
+
+    The sequence is always the same: delete the rows scoped to this
+    snapshot/changeset, COPY the new rows into an ON COMMIT DROP temp table,
+    then INSERT ... SELECT from it into the real table (where the geometry
+    casts and cross-table lookups happen). All inside the caller's single
+    transaction, so a failure anywhere leaves the previous rows untouched.
+    Returns the number of rows the INSERT wrote.
+    """
+    cursor.execute(delete_sql, delete_params)
+    cursor.execute(staging_ddl)
+    with cursor.copy(copy_sql) as copy:
+        for row in rows:
+            copy.write_row(row)
+    cursor.execute(insert_sql, insert_params)
+    return cursor.rowcount
+
+
 _STAGING_SNAPSHOT_DDL = """
     CREATE TEMP TABLE staging_snapshot_features (
         osm_id TEXT, osm_type TEXT, building TEXT, category TEXT, name TEXT,
@@ -74,36 +104,41 @@ _INSERT_SNAPSHOT_FEATURES = """
 """
 
 
+def _snapshot_feature_rows(features: list[dict[str, Any]]) -> Iterable[tuple]:
+    for feature in features:
+        props = feature["properties"]
+        yield (
+            props["osm_id"],
+            props["osm_type"],
+            props.get("building"),
+            props.get("category"),
+            props.get("name"),
+            json.dumps(props.get("raw_tags", {})),
+            props["original_valid"],
+            props.get("repair_method"),
+            _geom_hex(feature["geometry"]),
+        )
+
+
 def publish_snapshot_features(
     connection: Any, snapshot_id: int, processed_geojson: dict[str, Any]
 ) -> int:
     """Replace this snapshot's feature rows. Returns the row count written."""
-    features = processed_geojson.get("features", [])
     with connection.cursor() as cursor:
-        cursor.execute("DELETE FROM snapshot_features WHERE snapshot_id = %s", (snapshot_id,))
-        cursor.execute(_STAGING_SNAPSHOT_DDL)
-        with cursor.copy(
-            "COPY staging_snapshot_features "
-            "(osm_id, osm_type, building, category, name, raw_tags, "
-            "original_valid, repair_method, geom_hex) FROM STDIN"
-        ) as copy:
-            for feature in features:
-                props = feature["properties"]
-                copy.write_row(
-                    (
-                        props["osm_id"],
-                        props["osm_type"],
-                        props.get("building"),
-                        props.get("category"),
-                        props.get("name"),
-                        json.dumps(props.get("raw_tags", {})),
-                        props["original_valid"],
-                        props.get("repair_method"),
-                        _geom_hex(feature["geometry"]),
-                    )
-                )
-        cursor.execute(_INSERT_SNAPSHOT_FEATURES, {"snapshot_id": snapshot_id})
-        written = cursor.rowcount
+        written = _load_via_staging(
+            cursor,
+            delete_sql="DELETE FROM snapshot_features WHERE snapshot_id = %s",
+            delete_params=(snapshot_id,),
+            staging_ddl=_STAGING_SNAPSHOT_DDL,
+            copy_sql=(
+                "COPY staging_snapshot_features "
+                "(osm_id, osm_type, building, category, name, raw_tags, "
+                "original_valid, repair_method, geom_hex) FROM STDIN"
+            ),
+            rows=_snapshot_feature_rows(processed_geojson.get("features", [])),
+            insert_sql=_INSERT_SNAPSHOT_FEATURES,
+            insert_params={"snapshot_id": snapshot_id},
+        )
     connection.commit()
     return written
 
@@ -163,6 +198,35 @@ def _require_published_snapshot(cursor: Any, snapshot_id: int) -> None:
         )
 
 
+def _change_feature_rows(features: list[dict[str, Any]]) -> Iterable[tuple]:
+    for feature in features:
+        props = feature["properties"]
+        # A resolved 1:1 pair has exactly one candidate, whose metrics
+        # are the record's metrics. Multi-candidate (ambiguous) groups
+        # keep everything in `candidates` and leave these NULL rather
+        # than picking one to promote.
+        candidates = props.get("candidates", [])
+        metrics = candidates[0] if len(candidates) == 1 else {}
+        yield (
+            props["classification"],
+            props.get("match_method"),
+            props.get("match_score"),
+            props["classification_reason"],
+            props.get("osm_ids_a", []),
+            props.get("osm_ids_b", []),
+            props["involves_repaired_geometry"],
+            props["touches_aoi_boundary"],
+            metrics.get("iou"),
+            metrics.get("iou_centroid_aligned"),
+            metrics.get("centroid_shift_m"),
+            metrics.get("area_ratio"),
+            metrics.get("hausdorff_m"),
+            metrics.get("attrs_changed", []),
+            json.dumps(candidates),
+            _geom_hex(feature["geometry"]),
+        )
+
+
 def publish_change_features(
     connection: Any,
     changeset_id: int,
@@ -186,52 +250,26 @@ def publish_change_features(
         _require_published_snapshot(cursor, snapshot_a_id)
         _require_published_snapshot(cursor, snapshot_b_id)
 
-        cursor.execute("DELETE FROM change_features WHERE changeset_id = %s", (changeset_id,))
-        cursor.execute(_STAGING_CHANGE_DDL)
-        with cursor.copy(
-            "COPY staging_change_features "
-            "(classification, match_method, match_score, classification_reason, "
-            "osm_ids_a, osm_ids_b, involves_repaired_geometry, touches_aoi_boundary, "
-            "iou, iou_centroid_aligned, centroid_shift_m, area_ratio, hausdorff_m, "
-            "attrs_changed, candidates, geom_hex) FROM STDIN"
-        ) as copy:
-            for feature in features:
-                props = feature["properties"]
-                # A resolved 1:1 pair has exactly one candidate, whose metrics
-                # are the record's metrics. Multi-candidate (ambiguous) groups
-                # keep everything in `candidates` and leave these NULL rather
-                # than picking one to promote.
-                candidates = props.get("candidates", [])
-                metrics = candidates[0] if len(candidates) == 1 else {}
-                copy.write_row(
-                    (
-                        props["classification"],
-                        props.get("match_method"),
-                        props.get("match_score"),
-                        props["classification_reason"],
-                        props.get("osm_ids_a", []),
-                        props.get("osm_ids_b", []),
-                        props["involves_repaired_geometry"],
-                        props["touches_aoi_boundary"],
-                        metrics.get("iou"),
-                        metrics.get("iou_centroid_aligned"),
-                        metrics.get("centroid_shift_m"),
-                        metrics.get("area_ratio"),
-                        metrics.get("hausdorff_m"),
-                        metrics.get("attrs_changed", []),
-                        json.dumps(candidates),
-                        _geom_hex(feature["geometry"]),
-                    )
-                )
-        cursor.execute(
-            _INSERT_CHANGE_FEATURES,
-            {
+        written = _load_via_staging(
+            cursor,
+            delete_sql="DELETE FROM change_features WHERE changeset_id = %s",
+            delete_params=(changeset_id,),
+            staging_ddl=_STAGING_CHANGE_DDL,
+            copy_sql=(
+                "COPY staging_change_features "
+                "(classification, match_method, match_score, classification_reason, "
+                "osm_ids_a, osm_ids_b, involves_repaired_geometry, touches_aoi_boundary, "
+                "iou, iou_centroid_aligned, centroid_shift_m, area_ratio, hausdorff_m, "
+                "attrs_changed, candidates, geom_hex) FROM STDIN"
+            ),
+            rows=_change_feature_rows(features),
+            insert_sql=_INSERT_CHANGE_FEATURES,
+            insert_params={
                 "changeset_id": changeset_id,
                 "snapshot_a_id": snapshot_a_id,
                 "snapshot_b_id": snapshot_b_id,
             },
         )
-        written = cursor.rowcount
 
     connection.commit()
     return written

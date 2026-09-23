@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, NamedTuple
 
+from src.db._upsert import upsert_returning
+
 
 class SnapshotRow(NamedTuple):
     id: int
@@ -36,19 +38,17 @@ _UPSERT_SQL = """
     RETURNING id, ingestion_time
 """
 
-_SELECT_EXISTING_SQL = """
-    SELECT id, ingestion_time FROM snapshots
+# The natural key, written once: both lookups below select different columns
+# for the same row, and they must not drift apart.
+_NATURAL_KEY_WHERE = """
     WHERE source = %(source)s AND source_query_version = %(source_query_version)s
       AND layer = %(layer)s AND aoi_id = %(aoi_id)s AND aoi_version = %(aoi_version)s
       AND requested_time = %(requested_time)s
 """
 
-_GET_SQL = """
-    SELECT id, processed_object_uri FROM snapshots
-    WHERE source = %(source)s AND source_query_version = %(source_query_version)s
-      AND layer = %(layer)s AND aoi_id = %(aoi_id)s AND aoi_version = %(aoi_version)s
-      AND requested_time = %(requested_time)s
-"""
+_SELECT_EXISTING_SQL = f"SELECT id, ingestion_time FROM snapshots {_NATURAL_KEY_WHERE}"
+
+_GET_SQL = f"SELECT id, processed_object_uri FROM snapshots {_NATURAL_KEY_WHERE}"
 
 
 def upsert_snapshot(connection: Any, params: dict) -> SnapshotRow:
@@ -62,17 +62,8 @@ def upsert_snapshot(connection: Any, params: dict) -> SnapshotRow:
     raw_object_uri, processed_object_uri, feature_count,
     invalid_geometry_count, repaired_geometry_count.
     """
-    with connection.cursor() as cursor:
-        cursor.execute(_UPSERT_SQL, params)
-        row = cursor.fetchone()
-        if row is not None:
-            connection.commit()
-            return SnapshotRow(id=row[0], ingestion_time=row[1], created=True)
-
-        cursor.execute(_SELECT_EXISTING_SQL, params)
-        existing = cursor.fetchone()
-        connection.commit()
-        return SnapshotRow(id=existing[0], ingestion_time=existing[1], created=False)
+    row, created = upsert_returning(connection, _UPSERT_SQL, _SELECT_EXISTING_SQL, params)
+    return SnapshotRow(id=row[0], ingestion_time=row[1], created=created)
 
 
 def get_snapshot(connection: Any, params: dict) -> SnapshotLookup | None:
