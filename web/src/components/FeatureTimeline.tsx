@@ -1,12 +1,11 @@
 import { Box, Chip, Divider, Stack, Typography } from "@mui/material";
 import type { FeatureHistory } from "../api/types";
+import { isoDate } from "../format";
 import { CLASSIFICATION_COLORS, CLASSIFICATION_LABELS } from "../theme";
 
 interface Props {
   history: FeatureHistory;
 }
-
-const isoDate = (iso: string) => iso.slice(0, 10);
 
 /** One building across every snapshot held.
  *

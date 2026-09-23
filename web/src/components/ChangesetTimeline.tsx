@@ -1,15 +1,13 @@
 import { useMemo, useState } from "react";
 import { alpha, Box, ButtonBase, Typography, useTheme } from "@mui/material";
 import type { Changeset } from "../api/types";
+import { isoDate, shortLabel } from "../format";
 
 interface Props {
   changesets: Changeset[];
   selectedId: number | null;
   onChange: (id: number) => void;
 }
-
-const isoDate = (iso: string) => iso.slice(0, 10);
-const shortLabel = (iso: string) => iso.slice(0, 7); // "2026-06", or "2026" would drop the month needed to tell 2026-06 from 2026-07 apart.
 
 const ROW_HEIGHT = 28;
 const ROW_GAP = 10;

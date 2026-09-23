@@ -4,6 +4,7 @@ import {
 } from "@mui/material";
 import type { ChangeDetail, FeatureHistory } from "../api/types";
 import { CLASSIFICATION_COLORS, CLASSIFICATION_LABELS } from "../theme";
+import { fmt, isoDate } from "../format";
 import { FeatureTimeline } from "./FeatureTimeline";
 
 interface Props {
@@ -12,9 +13,6 @@ interface Props {
   loading: boolean;
   error: string | null;
 }
-
-const isoDate = (iso: string) => iso.slice(0, 10);
-const fmt = (v: number | null, digits = 4) => (v === null ? "—" : v.toFixed(digits));
 
 /** Explains a geometry change compositionally, from the two IoU metrics.
  *

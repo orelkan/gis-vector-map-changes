@@ -1,4 +1,4 @@
-import type { ChangeDetail, Changeset, FeatureHistory, Snapshot } from "./types";
+import type { ChangeDetail, Changeset, FeatureHistory } from "./types";
 
 /** Requests go to the same origin; Vite proxies /api and /tiles to the
  *  FastAPI service in development (see vite.config.ts). */
@@ -18,7 +18,6 @@ async function getJson<T>(path: string): Promise<T> {
 
 export const api = {
   listChangesets: () => getJson<Changeset[]>("/api/changesets"),
-  listSnapshots: () => getJson<Snapshot[]>("/api/snapshots"),
   getChange: (id: number) => getJson<ChangeDetail>(`/api/changes/${id}`),
   getHistory: (osmId: string) =>
     getJson<FeatureHistory>(`/api/history/${osmId}`),
