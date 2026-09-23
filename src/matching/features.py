@@ -13,17 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from pyproj import Transformer
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import transform as shapely_transform
 
-from src.matching.config import METRIC_CRS, SIGNIFICANT_TAGS
-
-# Snapshots are stored in OGC:CRS84 (see src.ingestion.snapshot.CRS) --
-# always_xy=True keeps lon,lat / x,y order, matching GeoJSON's coordinate
-# order.
-_TRANSFORMER = Transformer.from_crs("OGC:CRS84", METRIC_CRS, always_xy=True)
+from src.matching.config import SIGNIFICANT_TAGS
+from src.matching.crs import to_metric
 
 
 @dataclass(frozen=True)
@@ -34,15 +28,6 @@ class LoadedFeature:
     repaired: bool  # True if ingestion's repair_method was set for this feature
 
 
-def _reproject(geometry: BaseGeometry) -> BaseGeometry:
-    reprojected = shapely_transform(_TRANSFORMER.transform, geometry)
-    # A geometry valid in CRS84 is not guaranteed valid after reprojection
-    # (precision/topology can shift at extreme scale, though not expected
-    # at this AOI's size) -- repair defensively rather than let an invalid
-    # geometry silently propagate into every downstream metric.
-    return reprojected if reprojected.is_valid else reprojected.buffer(0)
-
-
 def load_feature(geojson_feature: dict[str, Any]) -> LoadedFeature:
     """Load one already-normalized feature (as produced by
     src.ingestion.snapshot.normalize_feature) into matching's representation.
@@ -50,7 +35,7 @@ def load_feature(geojson_feature: dict[str, Any]) -> LoadedFeature:
     props = geojson_feature["properties"]
     return LoadedFeature(
         osm_id=props["osm_id"],
-        geometry=_reproject(shape(geojson_feature["geometry"])),
+        geometry=to_metric(shape(geojson_feature["geometry"])),
         attrs={tag: props.get(tag) for tag in SIGNIFICANT_TAGS},
         repaired=props.get("repair_method") is not None,
     )

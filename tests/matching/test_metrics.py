@@ -105,3 +105,24 @@ def test_attrs_changed_can_report_multiple_tags():
     m = compute_metrics(a, b)
 
     assert set(m.attrs_changed) == {"building", "category"}
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        pytest.param(_square(0, 0, 10), _square(0, 0, 10), id="identical"),
+        pytest.param(_square(0, 0, 1), _square(100, 100, 1), id="disjoint"),
+        pytest.param(_square(0, 0, 2), _square(1, 1, 2), id="partial_overlap"),
+        pytest.param(_square(0, 0, 2), _square(0, 0, 1), id="contained"),
+        pytest.param(_square(0, 0, 1), _square(1, 0, 1), id="edge_contact_only"),
+    ],
+)
+def test_iou_never_exceeds_one(a, b):
+    # IoU is a ratio of an intersection to a union containing it, so it
+    # cannot exceed 1. Deriving the union area arithmetically (|A| + |B| -
+    # |A and B|) instead of via the overlay breaks this: measured against
+    # the real snapshots it returned values just above 1.0 for ~5k pairs.
+    # See the note in metrics._iou.
+    m = compute_metrics(_feat(a), _feat(b))
+    assert 0.0 <= m.iou <= 1.0
+    assert 0.0 <= m.iou_centroid_aligned <= 1.0

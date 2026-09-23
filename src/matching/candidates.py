@@ -32,11 +32,16 @@ def generate_candidates(
 
     result: dict[str, list[str]] = {}
     for a_id, a_feature in only_in_a.items():
-        matches = []
-        for idx in tree.query(a_feature.geometry):
-            b_id = b_ids[idx]
-            if a_feature.geometry.intersection(only_in_b[b_id].geometry).area > 0:
-                matches.append(b_id)
+        # `predicate="intersects"` makes the tree discard non-touching
+        # bounding-box hits in C, so only genuinely intersecting geometries
+        # reach the (much more expensive) overlay below. The overlay still
+        # decides candidacy: `intersects` is true for edge-only contact,
+        # which this module's docstring explicitly rules out.
+        geometry = a_feature.geometry
+        nearby = (b_ids[idx] for idx in tree.query(geometry, predicate="intersects"))
+        matches = [
+            b_id for b_id in nearby if geometry.intersection(only_in_b[b_id].geometry).area > 0
+        ]
         if matches:
             result[a_id] = matches
     return result

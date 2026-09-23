@@ -10,17 +10,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from pyproj import Transformer
 from shapely.geometry import mapping
-from shapely.ops import transform as shapely_transform
 from shapely.ops import unary_union
 
 from src.matching.changeset import ChangeRecord
-from src.matching.config import ALGORITHM_VERSION, METRIC_CRS
+from src.matching.config import ALGORITHM_VERSION
+from src.matching.crs import to_crs84
 from src.matching.features import LoadedFeature
 from src.matching.metrics import MatchMetrics
-
-_TO_CRS84 = Transformer.from_crs(METRIC_CRS, "OGC:CRS84", always_xy=True)
 
 
 def _metrics_dict(metrics: MatchMetrics) -> dict[str, Any]:
@@ -58,7 +55,7 @@ def render_change_layer(
     geojson_features = []
     for record in records:
         geometry = _record_geometry(record, features_a, features_b)
-        reprojected = shapely_transform(_TO_CRS84.transform, geometry)
+        reprojected = to_crs84(geometry)
 
         candidates = [
             {"osm_id_a": a_id, "osm_id_b": b_id, **_metrics_dict(metrics)}

@@ -14,29 +14,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from pyproj import Transformer
 from shapely.geometry import shape
-from shapely.ops import transform as shapely_transform
 
-from src.matching.changeset import ChangeRecord, build_changeset
-from src.matching.config import ALGORITHM_VERSION, METRIC_CRS
+from src.matching.changeset import CLASSIFICATIONS, ChangeRecord, build_changeset
+from src.matching.config import ALGORITHM_VERSION
+from src.matching.crs import to_metric
 from src.matching.features import load_features
 from src.matching.render import render_change_layer
 
-_TO_METRIC_CRS = Transformer.from_crs("OGC:CRS84", METRIC_CRS, always_xy=True)
-
 _COMPARABLE_FIELDS = ("source", "layer", "aoi_id", "aoi_version", "source_query_version")
-
-CLASSIFICATIONS = (
-    "unchanged",
-    "modified_geometry",
-    "modified_attributes",
-    "modified_geometry_and_attributes",
-    "added",
-    "removed",
-    "ambiguous",
-)
-
 
 @dataclass(frozen=True)
 class SnapshotRef:
@@ -81,7 +67,7 @@ def validate_comparable(snapshot_a: SnapshotRef, snapshot_b: SnapshotRef) -> Non
 def _aoi_boundary_in_metric_crs(aoi_geometry: dict[str, Any] | None):
     if aoi_geometry is None:
         return None
-    return shapely_transform(_TO_METRIC_CRS.transform, shape(aoi_geometry)).boundary
+    return to_metric(shape(aoi_geometry)).boundary
 
 
 def build_changeset_result(
