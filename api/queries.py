@@ -35,7 +35,13 @@ LIST_SNAPSHOTS = """
     ORDER BY s.requested_time
 """
 
-LIST_CHANGESETS = """
+# Both changeset queries select the same columns for the same joins and
+# differ only in their trailing clause. Composed from one base rather than
+# derived from each other by string replacement: a `.replace()` that stops
+# matching fails silently, leaving the "one changeset" query returning every
+# changeset, and the caller taking the first row would then serve the wrong
+# one with no error anywhere.
+_CHANGESET_SELECT = """
     SELECT c.id, c.algorithm_version,
            sa.id AS snapshot_a_id, sb.id AS snapshot_b_id,
            sa.requested_time AS time_a, sb.requested_time AS time_b,
@@ -45,13 +51,16 @@ LIST_CHANGESETS = """
     FROM changesets c
     JOIN snapshots sa ON sa.id = c.snapshot_a_id
     JOIN snapshots sb ON sb.id = c.snapshot_b_id
+"""
+
+# Shortest interval first, so the UI's timeline rows read as zoom levels.
+LIST_CHANGESETS = _CHANGESET_SELECT + """
     ORDER BY (sb.requested_time - sa.requested_time), sa.requested_time
 """
 
-GET_CHANGESET = LIST_CHANGESETS.replace(
-    "ORDER BY (sb.requested_time - sa.requested_time), sa.requested_time",
-    "WHERE c.id = %(changeset_id)s",
-)
+GET_CHANGESET = _CHANGESET_SELECT + """
+    WHERE c.id = %(changeset_id)s
+"""
 
 # Change-layer tile. Carries just enough to style and popup without a
 # round-trip; the detail endpoint supplies everything else.
