@@ -217,6 +217,150 @@ do this.
 
 ---
 
+## Refactor pass (2026-09-23)
+
+A review-driven cleanup across `src/matching`, `src/db`, `src/publish`,
+`dags/`, `api/` and `web/src`, constrained to be behavior-preserving. Net
+−178 lines. Two real defects surfaced while verifying it; both are described
+below because the verification, not the refactor, is the interesting part.
+
+**What changed.**
+
+- `src/matching/crs.py` is new: `to_metric` / `to_crs84` replace the three
+  separate `Transformer.from_crs` pairs that `features.py`, `pipeline.py` and
+  `render.py` each built, and carry the repair-after-reprojection rule that
+  only `features.py` previously applied.
+- `CLASSIFICATIONS` is now `get_args(Classification)` in `changeset.py`
+  instead of a hand-restated tuple in `pipeline.py`.
+- `compute_metrics` binds each geometry's area and centroid once; Shapely
+  recomputes on every property access and each was read three times.
+- Candidate generation passes `predicate="intersects"` to `STRtree.query`, so
+  non-touching bbox hits are discarded in C before the overlay runs.
+- `_connected_components` is a BFS over an adjacency dict rather than a
+  hand-rolled union-find with path halving.
+- `src/db/_upsert.py` holds the insert-then-read-back sequence both metadata
+  modules duplicated; each keeps its own SQL and row type.
+- `src/publish/postgis.py` shares one `_load_via_staging` helper between the
+  two publish functions, with row building split into generators.
+- `dags/common.py` holds the connection names, instant parsing, natural-key
+  builder, `current_params()`, and the single snapshot/comparison inventory.
+- `api/queries.py` composes `LIST_CHANGESETS` and `GET_CHANGESET` from one
+  base string instead of deriving one from the other by `.replace()`.
+- `web/src/format.ts` holds `isoDate` / `shortLabel` / `fmt`, previously
+  redefined in three components. `MapView.tsx` went from 298 lines and six
+  effects to 46 lines over four hooks in `web/src/components/map/`, and both
+  `as never` casts are gone (the code now typechecks properly).
+
+**Found: change-layer output was not reproducible.** Verifying the refactor
+against the stored MinIO artifacts showed differences in ambiguous records.
+Root cause predates this work: `pair_metrics` was built by iterating
+frozensets of osm_ids, that insertion order became the `candidates` array
+order of the exported GeoJSON, and Python randomizes string hashing per
+process. Demonstrated directly — the same changeset built twice under
+`PYTHONHASHSEED=1` and `=2` produced byte-different GeoJSON. This violated
+CLAUDE.md's "make deterministic output ordering part of exported artifacts
+and tests". Fixed by iterating `sorted(a_ids)` / `sorted(b_ids)`; after the
+fix the same changeset under `PYTHONHASHSEED=1` and `=999` is byte-identical.
+Regression test: `test_pair_metrics_ordering_is_deterministic_not_hash_dependent`,
+which passes under four different hash seeds.
+
+**Rejected: an IoU optimization that looked exact and was not.** Replacing
+`geom_a.union(geom_b).area` with `|A| + |B| - |A and B|` avoids the union
+overlay and benchmarked 1.7x faster. Measured against the real snapshots it
+is *not* equivalent: it disagreed on 5,164 of 26,978 ID-matched pairs by up
+to 2.1e-12, and returned `iou > 1.0` for 5,178 pairs, because the two area
+computations round differently. Far below every threshold in `config.py`, but
+it changes stored metric values, which per CLAUDE.md means a new
+`ALGORITHM_VERSION` rather than a silent rewrite. Reverted; the reasoning is
+recorded in `metrics._iou` and pinned by `test_iou_never_exceeds_one`.
+
+**Found: stale DAG defaults.** `ingest_osm_building_snapshots` still
+defaulted to 3 requested times while 7 snapshots were ingested and published
+and `publish_to_postgis` listed all 7 — so triggering ingestion on its
+defaults covered under half the dataset. Both now read `REQUESTED_TIMES` from
+`dags/common.py`. The two tests that pinned the stale values were rewritten
+to assert against the shared inventory (they were the only existing tests
+that needed changing).
+
+**Verification performed (2026-09-23).**
+
+1. `ruff check .` clean; `pytest` 126 passed, and `pytest -m db` 41 passed
+   against the real local Postgres.
+2. `airflow dags list-import-errors` in the running stack: no errors, so
+   `from dags.common import ...` resolves in the container as well as under
+   pytest.
+3. Output equality against the real data: the refactored pipeline was re-run
+   on all 7 stored changesets (~188k change records) and compared field by
+   field with the change layers in MinIO. **No value differences anywhere** —
+   every classification, metric, osm_id, reason and flag identical. Two
+   changesets were byte-identical; the other five differed only in the
+   `candidates` array ordering of 70 ambiguous records total (5/35/17/11/2),
+   which is the determinism fix above.
+4. Web: `tsc --noEmit` clean (both former `as never` casts removed, so the
+   map's style expression and overlay data are now genuinely type-checked),
+   27 vitest tests pass, and `npm run build` succeeds.
+5. Browser, via CDP against headless Chrome on the running stack: map canvas
+   mounts, all 8 intervals render, clicking an interval changes the selection
+   ("5 years ... 5,430 changes" -> "1 year ... 712 changes"), the
+   classification filter toggles, the basemap swaps (positron -> dark) with
+   the map surviving the `setStyle`, and no console errors or uncaught
+   exceptions.
+
+**Found and fixed: satellite basemap showed no data (2026-09-23).** Reported
+by the user after the refactor: switching to satellite view left the map with
+no buildings or changes on it at all, and switching interval did not help.
+Two distinct faults, the first exposed by the refactor and the second latent
+in the original:
+
+1. *`style.load` never fired for the satellite style.* MapLibre's `setStyle`
+   defaults to `diff: true`. Given the satellite style — an inline object
+   rather than a URL — the diff succeeds and strips this project's sources
+   and layers (they are not part of the new style spec) **without** a full
+   reload, so `style.load` never fires, `styleReady` never returns to true,
+   and the layers are never rebuilt. The street styles are URLs, so they
+   always fully reload and always fired it, which is why only satellite broke.
+   Fixed with `setStyle(style, { diff: false })`. Confirmed by instrumenting
+   the page: before the fix, satellite gave `styleLoadFired=false` and zero
+   of our layers; after, all five layers and the `changes` source are present
+   in satellite, across interval switches, and back on street.
+
+   The pre-refactor code survived this by accident: its single build effect
+   listed `basemap` in its dependencies, so it re-ran in the same commit as
+   the `setStyle` call while `styleReady` was still a stale `true`, re-adding
+   the layers moments after the diff removed them. Extracting the effect into
+   `useChangeLayers` dropped that dependency and exposed the real flaw.
+
+2. *Readiness was React state, so it could be read stale.* Toggling the
+   theme while in satellite then threw `Style is not done loading` from
+   `addSource`. The layer hooks run later in the same commit as the style
+   swap, and `mode` is one of their dependencies, so they re-ran with the
+   readiness value captured at render time — still `true` — and touched a
+   style that was mid-reload. This hazard existed in the original too; it was
+   simply never reached. Fixed by making readiness a ref
+   (`StyleState.ready`), which is accurate synchronously, with a companion
+   `version` counter as the state that triggers the rebuild render.
+
+Regression tests in `web/src/components/__tests__/useMapInstance.test.tsx`
+cover both: that `setStyle` is called with `{ diff: false }`, and that the
+readiness ref is already `false` by the time `setStyle` is invoked. Each was
+confirmed to fail when its fix is reverted. Verified end to end in a real
+browser via CDP: street renders, satellite requests Esri imagery and keeps
+the map, interval switching and theme toggling both survive while in
+satellite, returning to street works, and no uncaught exceptions throughout.
+
+**Caveat on the headless harness.** Headless Chrome here never requests
+`/tiles/changes/` or `/tiles/buildings/` at all - MapLibre mounts and loads
+the basemap, but the overlay sources never fetch. This was confirmed to be a
+property of the headless environment rather than the refactor by stashing the
+web changes and re-running: the pre-refactor `MapView` requests zero change
+tiles in the same harness. So the vector-tile path itself is unverified here
+and is worth a look in a real browser (`make up`, `make web`,
+http://localhost:5173): confirm the coloured change layer draws, switching
+interval swaps it, unchecking a class removes it from the map, and clicking a
+highlighted building opens the detail panel with the before/after outlines.
+
+---
+
 ## Concrete next steps
 
 None committed to yet — no milestone is currently in progress. Candidates

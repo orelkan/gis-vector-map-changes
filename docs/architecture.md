@@ -37,6 +37,15 @@ Airflow (ingest)     Airflow (match)      Airflow (publish)
 - **DAG files stay orchestration-only.** All business logic (normalization,
   matching, classification, publishing) lives in `src/`, importable and
   testable without Airflow, per CLAUDE.md's architecture rules.
+- **`dags/common.py`** holds the Airflow-side glue the three DAGs share:
+  connection names, instant parsing, the `snapshots` natural-key builder, and
+  the single inventory of which snapshot instants and comparison pairs this
+  project holds. That inventory lived in each DAG separately and had drifted
+  — the ingest DAG defaulted to 3 of the 7 ingested instants — so one copy is
+  a correctness property, not just less typing. It is imported as
+  `from dags.common import ...`, which resolves both under pytest
+  (`pythonpath = ["."]`) and in the container (`PYTHONPATH=/opt/airflow`,
+  where `dags/` is mounted), matching the existing `from src.` convention.
 
 ---
 
@@ -88,6 +97,14 @@ instant>` in `src/ingestion/snapshot.py`. Cross-checked against
   delete-then-insert scoped to one `snapshot_id`/`changeset_id` inside a
   single transaction.
 
+**Deterministic output ordering.** Change records are sorted by
+`(osm_ids_a, osm_ids_b)`, and within an ambiguous record the `candidates`
+array is ordered by `(osm_id_a, osm_id_b)`. The latter is explicit because
+it previously came from frozenset iteration, and Python randomizes string
+hashing per process — so the same inputs produced byte-different change-layer
+artifacts from one run to the next. Any new grouping or fan-out over a set
+of ids must sort before it serializes.
+
 ---
 
 ## 4. Geometry validation and CRS conventions
@@ -95,7 +112,10 @@ instant>` in `src/ingestion/snapshot.py`. Cross-checked against
 - All metric geometry computation (area, distance, IoU, Hausdorff) happens in
   **EPSG:2039** (Israel 1993 / Israeli TM Grid, metres), verified to cover the
   AOI. Never EPSG:4326 for metric work, per CLAUDE.md.
-- Snapshots are stored in **OGC:CRS84**; reprojection happens at load. Tile
+- Snapshots are stored in **OGC:CRS84**; reprojection happens at load, through
+  `src/matching/crs.py` (`to_metric` / `to_crs84`), which owns both
+  transformers and the rule that a geometry invalidated *by* reprojection is
+  repaired rather than allowed to propagate into the metrics. Tile
   serving additionally stores a **materialized EPSG:3857** column (§5) since
   `ST_Transform` is `STABLE`, not `IMMUTABLE`, and cannot be used in a GIST
   index expression — the projected geometry has to be stored, not indexed
@@ -217,6 +237,25 @@ every zoom).
   automatically by MapLibre's own `AttributionControl` once it's the active
   source, since the raster source declares an `attribution` string; no
   separate attribution wiring was needed.
+- **Rebuilding the map's own layers is driven by `style.load`, and every
+  basemap swap forces a full reload** (`setStyle(style, { diff: false })`).
+  MapLibre's default is to diff a new style against the current one: given
+  the satellite style, which is an inline object rather than a URL, that diff
+  succeeds and silently strips this project's sources and layers -- they are
+  not part of the incoming spec -- *without* firing `style.load`, leaving the
+  map permanently empty. A full reload always fires it.
+- **Style readiness is a ref, not React state** (`map/styleState.ts`). The
+  layer hooks run later in the same commit as the swap, so a state update
+  would reach them a render too late and they would call `addSource()`
+  against a style that is mid-reload (`Style is not done loading`). The ref
+  is accurate synchronously; a companion `version` counter is the state that
+  triggers the rebuild render. Readiness deliberately does not use
+  `map.isStyleLoaded()`, which also waits on tile downloads and so reports
+  false long after it is safe to add layers.
+- **`MapView` is an assembly of four hooks** (`web/src/components/map/`):
+  the map instance and its basemap, this project's tile layers, click-to-
+  select, and the selection overlay. Each owns one concern and one piece of
+  MapLibre lifecycle, which is what made the two faults above separable.
 
 ---
 
