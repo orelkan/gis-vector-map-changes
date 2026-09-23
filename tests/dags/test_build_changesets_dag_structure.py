@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 from airflow.models import DagBag
 
+from dags.common import COMPARISON_PAIRS, REQUESTED_TIMES
+
 DAG_ID = "build_changesets"
 
 
@@ -43,14 +45,21 @@ def test_build_and_persist_changeset_is_dynamically_mapped(dagbag: DagBag):
     assert "Mapped" in type(task).__name__
 
 
-def test_default_params_define_monthly_and_yearly_pairs(dagbag: DagBag):
+def test_default_pairs_match_the_shared_comparison_inventory(dagbag: DagBag):
+    # Shared with publish_to_postgis via dags/common.py: this DAG computes
+    # the changesets that one publishes, so a pair present in only one of
+    # them is either never computed or never served.
     dag = dagbag.dags[DAG_ID]
     pairs = dag.params["comparison_pairs"]
 
-    assert pairs == [
-        {"requested_time_a": "2026-06-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"},
-        {"requested_time_a": "2025-07-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"},
-    ]
+    assert pairs == COMPARISON_PAIRS
+    # The monthly and yearly pairs docs/matching-spec.md pins expected counts
+    # for are both present, alongside the 5-year span and the year-on-year
+    # steps that make the per-building timeline continuous.
+    assert {"requested_time_a": "2026-06-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"} in pairs
+    assert {"requested_time_a": "2025-07-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"} in pairs
+    assert all(p["requested_time_a"] in REQUESTED_TIMES for p in pairs)
+    assert all(p["requested_time_b"] in REQUESTED_TIMES for p in pairs)
 
 
 def test_default_source_query_version_matches_latest_ingestion_version(dagbag: DagBag):

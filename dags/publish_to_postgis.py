@@ -22,60 +22,32 @@ Manually triggered (schedule=None) for consistency with the other two DAGs.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.sdk import Param, dag, get_current_context, task
+from airflow.sdk import Param, dag, task
 
+from dags.common import (
+    AWS_CONN_ID,
+    COMPARISON_PAIRS,
+    DEFAULT_ALGORITHM_VERSION,
+    DEFAULT_AOI_ID,
+    DEFAULT_AOI_VERSION,
+    DEFAULT_LAYER,
+    DEFAULT_SOURCE,
+    DEFAULT_SOURCE_QUERY_VERSION,
+    POSTGRES_CONN_ID,
+    REQUESTED_TIMES,
+    current_params,
+    natural_key,
+)
 from src.db import changesets as changesets_db
 from src.db import snapshots as snapshots_db
 from src.publish import postgis
 from src.storage import object_store
 
 log = logging.getLogger(__name__)
-
-# Every snapshot currently ingested (see ingest_osm_building_snapshots).
-DEFAULT_REQUESTED_TIMES = [
-    "2021-07-01T00:00:00Z",
-    "2022-07-01T00:00:00Z",
-    "2023-07-01T00:00:00Z",
-    "2024-07-01T00:00:00Z",
-    "2025-07-01T00:00:00Z",
-    "2026-06-01T00:00:00Z",
-    "2026-07-01T00:00:00Z",
-]
-
-# Every changeset currently computed (see build_changesets).
-DEFAULT_COMPARISON_PAIRS = [
-    {"requested_time_a": "2026-06-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"},
-    {"requested_time_a": "2025-07-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"},
-    {"requested_time_a": "2021-07-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"},
-    {"requested_time_a": "2021-07-01T00:00:00Z", "requested_time_b": "2022-07-01T00:00:00Z"},
-    {"requested_time_a": "2022-07-01T00:00:00Z", "requested_time_b": "2023-07-01T00:00:00Z"},
-    {"requested_time_a": "2023-07-01T00:00:00Z", "requested_time_b": "2024-07-01T00:00:00Z"},
-    {"requested_time_a": "2024-07-01T00:00:00Z", "requested_time_b": "2025-07-01T00:00:00Z"},
-]
-
-AWS_CONN_ID = os.environ.get("MINIO_AIRFLOW_CONN_ID", "minio_default")
-POSTGRES_CONN_ID = os.environ.get("GIS_POSTGRES_AIRFLOW_CONN_ID", "gis_postgres_default")
-
-
-def _parse_instant(iso: str) -> datetime:
-    return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-
-
-def _natural_key(params: dict, requested_time_str: str) -> dict:
-    return {
-        "source": params["source"],
-        "layer": params["layer"],
-        "aoi_id": params["aoi_id"],
-        "aoi_version": params["aoi_version"],
-        "source_query_version": params["source_query_version"],
-        "requested_time": _parse_instant(requested_time_str),
-    }
-
 
 @dag(
     dag_id="publish_to_postgis",
@@ -85,23 +57,23 @@ def _natural_key(params: dict, requested_time_str: str) -> dict:
     tags=["publish", "postgis", "web"],
     params={
         "requested_times": Param(
-            DEFAULT_REQUESTED_TIMES,
+            REQUESTED_TIMES,
             type="array",
             description="Snapshot instants to publish into snapshot_features.",
         ),
         "comparison_pairs": Param(
-            DEFAULT_COMPARISON_PAIRS,
+            COMPARISON_PAIRS,
             type="array",
             description="Changesets to publish into change_features. Both snapshots of "
             "each pair must also appear in requested_times (or already be published).",
         ),
-        "source": Param("openstreetmap-ohsome", type="string"),
-        "layer": Param("building", type="string"),
-        "aoi_id": Param("tel-aviv-yafo", type="string"),
-        "aoi_version": Param("v1", type="string"),
-        "source_query_version": Param("v2", type="string"),
+        "source": Param(DEFAULT_SOURCE, type="string"),
+        "layer": Param(DEFAULT_LAYER, type="string"),
+        "aoi_id": Param(DEFAULT_AOI_ID, type="string"),
+        "aoi_version": Param(DEFAULT_AOI_VERSION, type="string"),
+        "source_query_version": Param(DEFAULT_SOURCE_QUERY_VERSION, type="string"),
         "algorithm_version": Param(
-            "v1",
+            DEFAULT_ALGORITHM_VERSION,
             type="string",
             description="Which matching algorithm version's changesets to publish.",
         ),
@@ -110,20 +82,20 @@ def _natural_key(params: dict, requested_time_str: str) -> dict:
 def publish_to_postgis():
     @task
     def get_requested_times() -> list[str]:
-        return get_current_context().get("params", {})["requested_times"]
+        return current_params()["requested_times"]
 
     @task
     def get_comparison_pairs() -> list[dict]:
-        return get_current_context().get("params", {})["comparison_pairs"]
+        return current_params()["comparison_pairs"]
 
     @task(retries=2, retry_delay=timedelta(minutes=1), execution_timeout=timedelta(minutes=15))
     def publish_snapshot(requested_time_str: str) -> dict:
-        params = get_current_context().get("params", {})
+        params = current_params()
         pg_conn = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID).get_conn()
         s3_client = S3Hook(aws_conn_id=AWS_CONN_ID).get_conn()
 
-        natural_key = _natural_key(params, requested_time_str)
-        lookup = snapshots_db.get_snapshot(pg_conn, natural_key)
+        key = natural_key(params, requested_time_str)
+        lookup = snapshots_db.get_snapshot(pg_conn, key)
         if lookup is None:
             raise ValueError(
                 f"no ingested snapshot for {requested_time_str} -- run "
@@ -140,12 +112,12 @@ def publish_to_postgis():
 
     @task(retries=2, retry_delay=timedelta(minutes=1), execution_timeout=timedelta(minutes=15))
     def publish_changeset(pair: dict) -> dict:
-        params = get_current_context().get("params", {})
+        params = current_params()
         pg_conn = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID).get_conn()
         s3_client = S3Hook(aws_conn_id=AWS_CONN_ID).get_conn()
 
-        snap_a = snapshots_db.get_snapshot(pg_conn, _natural_key(params, pair["requested_time_a"]))
-        snap_b = snapshots_db.get_snapshot(pg_conn, _natural_key(params, pair["requested_time_b"]))
+        snap_a = snapshots_db.get_snapshot(pg_conn, natural_key(params, pair["requested_time_a"]))
+        snap_b = snapshots_db.get_snapshot(pg_conn, natural_key(params, pair["requested_time_b"]))
         if snap_a is None or snap_b is None:
             raise ValueError(f"missing ingested snapshot(s) for pair {pair!r}")
 

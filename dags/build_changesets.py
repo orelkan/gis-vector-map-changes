@@ -14,22 +14,36 @@ snapshot pairs for the monthly/yearly MVP comparison, not a recurring
 "latest vs previous" job. Revisit for a future continuous-monitoring
 milestone.
 
-Default comparison pairs match the two changesets docs/matching-spec.md
-analyzes and pins expected output counts for: monthly
-(2026-06-01 -> 2026-07-01) and yearly (2025-07-01 -> 2026-07-01), both
-against the v2 snapshots (see ingest_osm_building_snapshots's v1->v2 note).
+Default comparison pairs come from dags/common.py, which is the single
+inventory of what this project computes: the monthly (2026-06-01 ->
+2026-07-01) and yearly (2025-07-01 -> 2026-07-01) pairs that
+docs/matching-spec.md analyzes and pins expected counts for, plus the 5-year
+span and the year-on-year steps the web UI's timeline needs. All against the
+v2 snapshots (see ingest_osm_building_snapshots's v1->v2 note).
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.sdk import Param, dag, get_current_context, task
+from airflow.sdk import Param, dag, task
 
+from dags.common import (
+    AWS_CONN_ID,
+    COMPARISON_PAIRS,
+    DEFAULT_AOI_ID,
+    DEFAULT_AOI_VERSION,
+    DEFAULT_LAYER,
+    DEFAULT_SOURCE,
+    DEFAULT_SOURCE_QUERY_VERSION,
+    MINIO_BUCKET,
+    POSTGRES_CONN_ID,
+    current_params,
+    natural_key,
+)
 from src.db import changesets as changesets_db
 from src.db import snapshots as snapshots_db
 from src.ingestion.aoi import load_aoi
@@ -38,61 +52,21 @@ from src.storage import object_store
 
 log = logging.getLogger(__name__)
 
-DEFAULT_COMPARISON_PAIRS = [
-    # monthly
-    {"requested_time_a": "2026-06-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"},
-    # yearly
-    {"requested_time_a": "2025-07-01T00:00:00Z", "requested_time_b": "2026-07-01T00:00:00Z"},
-]
 
-MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "gis-vector-map-changes")
-AWS_CONN_ID = os.environ.get("MINIO_AIRFLOW_CONN_ID", "minio_default")
-POSTGRES_CONN_ID = os.environ.get("GIS_POSTGRES_AIRFLOW_CONN_ID", "gis_postgres_default")
-
-
-def _parse_instant(iso: str) -> datetime:
-    return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-
-
-def _fetch_snapshot(
-    pg_conn,
-    s3_client,
-    *,
-    source,
-    layer,
-    aoi_id,
-    aoi_version,
-    source_query_version,
-    requested_time_str,
-):
+def _fetch_snapshot(pg_conn, s3_client, params: dict, requested_time_str: str):
     """Looks up a snapshot by natural key and fetches its processed GeoJSON.
     Fails loudly (rather than skip) if the snapshot doesn't exist --
     matching depends on ingestion having already run for this instant.
     """
-    natural_key = {
-        "source": source,
-        "layer": layer,
-        "aoi_id": aoi_id,
-        "aoi_version": aoi_version,
-        "source_query_version": source_query_version,
-        "requested_time": _parse_instant(requested_time_str),
-    }
-    lookup = snapshots_db.get_snapshot(pg_conn, natural_key)
+    key = natural_key(params, requested_time_str)
+    lookup = snapshots_db.get_snapshot(pg_conn, key)
     if lookup is None:
         raise ValueError(
-            f"no ingested snapshot found for {natural_key!r} -- run "
+            f"no ingested snapshot found for {key!r} -- run "
             "ingest_osm_building_snapshots for this instant first"
         )
 
-    ref = SnapshotRef(
-        id=lookup.id,
-        source=source,
-        layer=layer,
-        aoi_id=aoi_id,
-        aoi_version=aoi_version,
-        source_query_version=source_query_version,
-        requested_time=natural_key["requested_time"],
-    )
+    ref = SnapshotRef(id=lookup.id, **key)
     geojson = object_store.get_json(s3_client, lookup.processed_object_uri)
     return ref, geojson
 
@@ -105,17 +79,17 @@ def _fetch_snapshot(
     tags=["matching", "osm", "buildings"],
     params={
         "comparison_pairs": Param(
-            DEFAULT_COMPARISON_PAIRS,
+            COMPARISON_PAIRS,
             type="array",
             description="List of {requested_time_a, requested_time_b} ISO-8601 UTC instant "
             "pairs to compare. Both instants must already have an ingested snapshot.",
         ),
-        "source": Param("openstreetmap-ohsome", type="string"),
-        "layer": Param("building", type="string"),
-        "aoi_id": Param("tel-aviv-yafo", type="string"),
-        "aoi_version": Param("v1", type="string"),
+        "source": Param(DEFAULT_SOURCE, type="string"),
+        "layer": Param(DEFAULT_LAYER, type="string"),
+        "aoi_id": Param(DEFAULT_AOI_ID, type="string"),
+        "aoi_version": Param(DEFAULT_AOI_VERSION, type="string"),
         "source_query_version": Param(
-            "v2",
+            DEFAULT_SOURCE_QUERY_VERSION,
             type="string",
             description="Which ingested snapshot version to compare -- must match an "
             "existing snapshots.source_query_version.",
@@ -125,8 +99,7 @@ def _fetch_snapshot(
 def build_changesets():
     @task
     def get_comparison_pairs() -> list[dict]:
-        context = get_current_context()
-        return context.get("params", {})["comparison_pairs"]
+        return current_params()["comparison_pairs"]
 
     @task(
         retries=3,
@@ -134,24 +107,16 @@ def build_changesets():
         execution_timeout=timedelta(minutes=15),
     )
     def build_and_persist_changeset(pair: dict) -> dict:
-        context = get_current_context()
-        params = context.get("params", {})
+        params = current_params()
 
         pg_conn = PostgresHook(postgres_conn_id=POSTGRES_CONN_ID).get_conn()
         s3_client = S3Hook(aws_conn_id=AWS_CONN_ID).get_conn()
 
-        common = {
-            "source": params["source"],
-            "layer": params["layer"],
-            "aoi_id": params["aoi_id"],
-            "aoi_version": params["aoi_version"],
-            "source_query_version": params["source_query_version"],
-        }
         snapshot_a, geojson_a = _fetch_snapshot(
-            pg_conn, s3_client, requested_time_str=pair["requested_time_a"], **common
+            pg_conn, s3_client, params, pair["requested_time_a"]
         )
         snapshot_b, geojson_b = _fetch_snapshot(
-            pg_conn, s3_client, requested_time_str=pair["requested_time_b"], **common
+            pg_conn, s3_client, params, pair["requested_time_b"]
         )
 
         aoi = load_aoi()

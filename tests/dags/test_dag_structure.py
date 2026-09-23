@@ -7,6 +7,8 @@ from __future__ import annotations
 import pytest
 from airflow.models import DagBag
 
+from dags.common import REQUESTED_TIMES
+
 DAG_ID = "ingest_osm_building_snapshots"
 
 
@@ -46,14 +48,22 @@ def test_fetch_and_persist_snapshot_is_dynamically_mapped(dagbag: DagBag):
     assert "Mapped" in type(task).__name__
 
 
-def test_default_params_define_three_requested_times(dagbag: DagBag):
+def test_default_requested_times_cover_every_held_snapshot(dagbag: DagBag):
+    # These defaults used to list only 3 instants while 7 were actually
+    # ingested and published, so triggering this DAG on its defaults covered
+    # under half the dataset. Both the inventory and this assertion now come
+    # from dags/common.py, so they cannot drift apart again.
     dag = dagbag.dags[DAG_ID]
-    default_times = dag.params["requested_times"]
-    assert len(default_times) == 3
-    # Spacing: one pair one month apart, one pair one year apart, sharing
-    # the "current" instant -- see the plan doc / DAG docstring for why
-    # these specific dates (shifted to stay inside ohsome's data extent).
-    assert default_times == [
+
+    assert dag.params["requested_times"] == REQUESTED_TIMES
+    # Annually 2021..2025, plus the two 2026 instants that give the web UI
+    # its 1-month interval. Dates stop at 2026-07 because that is where
+    # ohsome's data extent currently ends.
+    assert dag.params["requested_times"] == [
+        "2021-07-01T00:00:00Z",
+        "2022-07-01T00:00:00Z",
+        "2023-07-01T00:00:00Z",
+        "2024-07-01T00:00:00Z",
         "2025-07-01T00:00:00Z",
         "2026-06-01T00:00:00Z",
         "2026-07-01T00:00:00Z",

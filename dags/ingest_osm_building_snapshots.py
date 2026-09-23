@@ -1,5 +1,5 @@
-"""Ingest three dated Tel Aviv-Yafo building snapshots from OpenStreetMap
-(via the ohsome API) and persist them durably (MinIO + Postgres metadata).
+"""Ingest dated Tel Aviv-Yafo building snapshots from OpenStreetMap (via the
+ohsome API) and persist them durably (MinIO + Postgres metadata).
 
 Orchestration only, per CLAUDE.md's architecture rules -- all business logic
 lives in src/ingestion, src/storage, src/db, and is independently testable
@@ -10,48 +10,45 @@ Manually triggered (schedule=None): this DAG fetches specific historical
 instants chosen for a monthly/yearly comparison MVP, not a recurring
 "today's data" collection. A logical-date/backfill-driven design would be
 the more idiomatic Airflow model for *ongoing* monthly collection, but
-forcing that onto three fixed, deliberately-chosen historical points now
+forcing that onto a fixed set of deliberately-chosen historical points now
 would add catchup/start_date complexity without benefit -- see the plan
 doc's DAG design section. Revisit this for a future continuous-monitoring
 milestone.
 
-Snapshot dates default to 2025-07-01 / 2026-06-01 / 2026-07-01 (not the
-2025-08-01 / 2026-07-01 / 2026-08-01 originally discussed) because ohsome's
-underlying data extent currently only reaches 2026-07-27T09:00Z (confirmed
-via GET /v1/metadata) -- the dates were shifted back one month, keeping the
-same 1-month/1-year spacing, to stay inside real data coverage.
+Which instants get fetched comes from REQUESTED_TIMES in dags/common.py --
+shared with publish_to_postgis so the two cannot disagree about what this
+project holds. Dates end at 2026-07-01 (rather than the 2026-08-01
+originally discussed) because ohsome's underlying data extent currently
+reaches only 2026-07-27T09:00Z (confirmed via GET /v1/metadata); they were
+shifted back one month, keeping the 1-month/1-year spacing, to stay inside
+real data coverage.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from airflow.sdk import Param, dag, get_current_context, task
+from airflow.sdk import Param, dag, task
 
+from dags.common import (
+    AWS_CONN_ID,
+    DEFAULT_AOI_VERSION,
+    DEFAULT_SOURCE_QUERY_VERSION,
+    MINIO_BUCKET,
+    POSTGRES_CONN_ID,
+    REQUESTED_TIMES,
+    current_params,
+    parse_instant,
+)
 from src.db import snapshots as snapshots_db
 from src.ingestion.aoi import load_aoi
 from src.ingestion.snapshot import build_snapshot
 from src.storage import object_store
 
 log = logging.getLogger(__name__)
-
-DEFAULT_REQUESTED_TIMES = [
-    "2025-07-01T00:00:00Z",  # yearly baseline
-    "2026-06-01T00:00:00Z",  # monthly baseline
-    "2026-07-01T00:00:00Z",  # current (shared by both comparison pairs)
-]
-
-MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "gis-vector-map-changes")
-# Connection *names*, not credentials -- the actual secrets behind them live
-# in Airflow's own encrypted Connection store, created from .env by
-# airflow-init in docker-compose.yml (same env vars, so the two stay bound
-# to the same names without hardcoding them twice).
-AWS_CONN_ID = os.environ.get("MINIO_AIRFLOW_CONN_ID", "minio_default")
-POSTGRES_CONN_ID = os.environ.get("GIS_POSTGRES_AIRFLOW_CONN_ID", "gis_postgres_default")
 
 
 @dag(
@@ -62,13 +59,13 @@ POSTGRES_CONN_ID = os.environ.get("GIS_POSTGRES_AIRFLOW_CONN_ID", "gis_postgres_
     tags=["ingestion", "osm", "buildings"],
     params={
         "requested_times": Param(
-            DEFAULT_REQUESTED_TIMES,
+            REQUESTED_TIMES,
             type="array",
             description="ISO-8601 UTC instants (YYYY-MM-DDTHH:MM:SSZ) to fetch as independent snapshots.",
         ),
-        "aoi_version": Param("v1", type="string"),
+        "aoi_version": Param(DEFAULT_AOI_VERSION, type="string"),
         "source_query_version": Param(
-            "v2",
+            DEFAULT_SOURCE_QUERY_VERSION,
             type="string",
             description="Version of our extraction definition (ohsome filter + extracted tags + "
             "geometry normalization). Bump when that logic changes. "
@@ -80,11 +77,7 @@ POSTGRES_CONN_ID = os.environ.get("GIS_POSTGRES_AIRFLOW_CONN_ID", "gis_postgres_
 def ingest_osm_building_snapshots():
     @task
     def get_requested_times() -> list[str]:
-        context = get_current_context()
-        # Airflow's Context TypedDict marks "params" as not required, even
-        # though it's always populated for a running task -- .get() with a
-        # default satisfies the type checker without changing behavior.
-        return context.get("params", {})["requested_times"]
+        return current_params()["requested_times"]
 
     @task(
         retries=3,
@@ -92,8 +85,7 @@ def ingest_osm_building_snapshots():
         execution_timeout=timedelta(minutes=10),
     )
     def fetch_and_persist_snapshot(requested_time_str: str) -> dict:
-        context = get_current_context()
-        params = context.get("params", {})  # see get_requested_times() for why .get()
+        params = current_params()
 
         aoi = load_aoi()
         if aoi.aoi_version != params["aoi_version"]:
@@ -102,9 +94,7 @@ def ingest_osm_building_snapshots():
                 f"committed AOI file's aoi_version={aoi.aoi_version!r}"
             )
 
-        requested_time = datetime.strptime(requested_time_str, "%Y-%m-%dT%H:%M:%SZ").replace(
-            tzinfo=UTC
-        )
+        requested_time = parse_instant(requested_time_str)
 
         result = build_snapshot(
             aoi, requested_time, source_query_version=params["source_query_version"]
